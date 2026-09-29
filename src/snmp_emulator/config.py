@@ -6,6 +6,8 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
+from .domain.types import SnmpDataType, validate_snmp_value
+
 
 class AgentConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -20,7 +22,7 @@ class MetricConfig(BaseModel):
 
     name: str = Field(min_length=1)
     oid: str
-    type: str
+    type: SnmpDataType
     initial: Any
     access: Literal["read-only"] = "read-only"
 
@@ -39,6 +41,14 @@ class MetricConfig(BaseModel):
         if any(number < 0 for number in numbers):
             raise ValueError("OID components cannot be negative")
         return ".".join(str(number) for number in numbers)
+
+    @field_validator("initial")
+    @classmethod
+    def validate_initial(cls, value: Any, info: Any) -> Any:
+        data_type = info.data.get("type")
+        if data_type is None:
+            return value
+        return validate_snmp_value(data_type, value)
 
 
 class EmulatorConfig(BaseModel):
