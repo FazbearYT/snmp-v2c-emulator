@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
+import logging
 from collections.abc import Sequence
 from pathlib import Path
 
 from . import __version__
+from .application import EmulatorApplication
 from .config import ConfigurationError, load_config
 
 
@@ -13,6 +16,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=__version__)
     parser.add_argument("--config", type=Path, help="path to a YAML configuration")
     parser.add_argument("--check-config", action="store_true")
+    parser.add_argument(
+        "--log-level",
+        choices=("DEBUG", "INFO", "WARNING", "ERROR"),
+        default="INFO",
+    )
     return parser
 
 
@@ -28,7 +36,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.check_config:
         print(f"configuration is valid: {len(config.metrics)} metrics")
         return 0
-    # TODO: pass the validated configuration to the runtime service.
+    logging.basicConfig(
+        level=getattr(logging, args.log_level),
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+    try:
+        asyncio.run(EmulatorApplication(config).run())
+    except KeyboardInterrupt:
+        logging.getLogger(__name__).info("emulator stopped")
     return 0
 
 
