@@ -8,7 +8,6 @@ from pysnmp.carrier.asyncio.dgram import udp
 from pysnmp.entity import config, engine
 from pysnmp.entity.rfc3413 import cmdrsp, context
 from pysnmp.proto import rfc1902
-from pysnmp.proto.api import v2c
 from pysnmp.smi import exval
 from pysnmp.smi.instrum import AbstractMibInstrumController
 
@@ -50,6 +49,21 @@ class StoreInstrumentation(AbstractMibInstrumController):
             result.append((name, encode_value(metric) if metric else exval.noSuchObject))
         return result
 
+    def read_next_variables(
+        self,
+        *var_binds: tuple[Any, Any],
+        **context_data: Any,
+    ) -> list[tuple[Any, Any]]:
+        result: list[tuple[Any, Any]] = []
+        for name, _ in var_binds:
+            oid = ObjectIdentifier(tuple(int(part) for part in name))
+            metric = self.store.get_next(oid)
+            if metric is None:
+                result.append((name, exval.endOfMibView))
+            else:
+                result.append((rfc1902.ObjectName(metric.oid.parts), encode_value(metric)))
+        return result
+
 
 class SnmpAgent:
     def __init__(self, host: str, port: int, community: str, store: MetricStore) -> None:
@@ -79,10 +93,11 @@ class SnmpAgent:
         snmp_context.unregister_context_name(b"")
         snmp_context.register_context_name(b"", StoreInstrumentation(self.store))
         cmdrsp.GetCommandResponder(snmp_engine, snmp_context)
+        cmdrsp.NextCommandResponder(snmp_engine, snmp_context)
+        cmdrsp.BulkCommandResponder(snmp_engine, snmp_context)
         self._engine = snmp_engine
         await asyncio.sleep(0)
         LOGGER.info("listening on udp://%s:%d", self.host, self.port)
-        # TODO: register GETNEXT and GETBULK responders after exact lookup is covered.
 
     async def stop(self) -> None:
         if self._engine is not None:
