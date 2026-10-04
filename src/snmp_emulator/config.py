@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
@@ -51,12 +51,43 @@ class MetricConfig(BaseModel):
         return validate_snmp_value(data_type, value)
 
 
+class SetActionConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["set"]
+    metric: str
+    at: float = Field(ge=0)
+    value: Any
+
+
+class SequenceActionConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["sequence"]
+    metric: str
+    at: float = Field(default=0, ge=0)
+    interval: float = Field(gt=0)
+    values: list[Any] = Field(min_length=1)
+
+
+ActionConfig = Annotated[SetActionConfig | SequenceActionConfig, Field(discriminator="type")]
+
+
+class ScenarioConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1)
+    repeat_every: float | None = Field(default=None, gt=0)
+    actions: list[ActionConfig] = Field(min_length=1)
+
+
 class EmulatorConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     schema_version: Literal[1]
     agent: AgentConfig = Field(default_factory=AgentConfig)
     metrics: list[MetricConfig] = Field(min_length=1)
+    scenarios: list[ScenarioConfig] = Field(default_factory=list)
 
     @field_validator("metrics")
     @classmethod
