@@ -3,9 +3,15 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 
-from ..config import ScenarioConfig, SequenceActionConfig, SetActionConfig
+from ..config import (
+    RampActionConfig,
+    ScenarioConfig,
+    SequenceActionConfig,
+    SetActionConfig,
+    StepActionConfig,
+)
 from ..domain.store import MetricStore
-from .actions import Action, SequenceAction, SetAction
+from .actions import Action, RampAction, SequenceAction, SetAction, StepAction
 from .clock import Clock, MonotonicClock
 
 
@@ -30,6 +36,28 @@ def build_scenarios(configs: list[ScenarioConfig]) -> tuple[Scenario, ...]:
                         action.at,
                         action.interval,
                         tuple(action.values),
+                    )
+                )
+            elif isinstance(action, RampActionConfig):
+                actions.append(
+                    RampAction(
+                        action.metric,
+                        action.at,
+                        action.duration,
+                        action.start,
+                        action.end,
+                    )
+                )
+            elif isinstance(action, StepActionConfig):
+                actions.append(
+                    StepAction(
+                        action.metric,
+                        action.at,
+                        action.interval,
+                        action.start,
+                        action.amount,
+                        action.minimum,
+                        action.maximum,
                     )
                 )
         scenarios.append(Scenario(item.name, tuple(actions), item.repeat_every))

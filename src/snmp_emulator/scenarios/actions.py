@@ -31,4 +31,44 @@ class SequenceAction:
 Action = SetAction | SequenceAction
 
 
-# TODO: add continuous ramp and fixed-step actions after timeline semantics settle.
+@dataclass(frozen=True, slots=True)
+class RampAction:
+    metric: str
+    at: float
+    duration: float
+    start: float
+    end: float
+
+    def value_at(self, elapsed: float) -> tuple[bool, Any]:
+        if elapsed < self.at:
+            return (False, None)
+        progress = min((elapsed - self.at) / self.duration, 1.0)
+        value = self.start + (self.end - self.start) * progress
+        if self.start.is_integer() and self.end.is_integer():
+            value = round(value)
+        return (True, value)
+
+
+@dataclass(frozen=True, slots=True)
+class StepAction:
+    metric: str
+    at: float
+    interval: float
+    start: int
+    amount: int
+    minimum: int | None = None
+    maximum: int | None = None
+
+    def value_at(self, elapsed: float) -> tuple[bool, Any]:
+        if elapsed < self.at:
+            return (False, None)
+        steps = int((elapsed - self.at) // self.interval)
+        value = self.start + steps * self.amount
+        if self.minimum is not None:
+            value = max(value, self.minimum)
+        if self.maximum is not None:
+            value = min(value, self.maximum)
+        return (True, value)
+
+
+Action = SetAction | SequenceAction | RampAction | StepAction

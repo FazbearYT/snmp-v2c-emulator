@@ -16,11 +16,12 @@ scenarios:
   - name: cpu_demo
     repeat_every: 12
     actions:
-      - type: sequence
+      - type: ramp
         metric: cpu_usage
         at: 2
-        interval: 2
-        values: [25, 40, 65, 90]
+        duration: 6
+        start: 15
+        end: 90
       - type: set
         metric: cpu_usage
         at: 10

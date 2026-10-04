@@ -4,7 +4,7 @@ from snmp_emulator.domain.metric import Metric
 from snmp_emulator.domain.oid import ObjectIdentifier
 from snmp_emulator.domain.store import MetricStore
 from snmp_emulator.domain.types import SnmpDataType
-from snmp_emulator.scenarios.actions import SequenceAction, SetAction
+from snmp_emulator.scenarios.actions import RampAction, SequenceAction, SetAction, StepAction
 from snmp_emulator.scenarios.engine import Scenario, ScenarioEngine
 
 
@@ -62,3 +62,18 @@ def test_sequence_advances_and_repeats() -> None:
     clock.value = 6.1
     engine.tick()
     assert store.get_by_name("cpu").value == 20
+
+
+def test_ramp_interpolates_value() -> None:
+    action = RampAction("cpu", at=2, duration=8, start=10.0, end=90.0)
+
+    assert action.value_at(1) == (False, None)
+    assert action.value_at(6) == (True, 50)
+    assert action.value_at(20) == (True, 90)
+
+
+def test_step_respects_maximum() -> None:
+    action = StepAction("cpu", at=0, interval=2, start=10, amount=15, maximum=40)
+
+    assert action.value_at(2)[1] == 25
+    assert action.value_at(10)[1] == 40

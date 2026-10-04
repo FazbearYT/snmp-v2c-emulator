@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Annotated, Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from .domain.types import SnmpDataType, validate_snmp_value
 
@@ -70,7 +70,34 @@ class SequenceActionConfig(BaseModel):
     values: list[Any] = Field(min_length=1)
 
 
-ActionConfig = Annotated[SetActionConfig | SequenceActionConfig, Field(discriminator="type")]
+class RampActionConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["ramp"]
+    metric: str
+    at: float = Field(default=0, ge=0)
+    duration: float = Field(gt=0)
+    start: float
+    end: float
+
+
+class StepActionConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["step"]
+    metric: str
+    at: float = Field(default=0, ge=0)
+    interval: float = Field(gt=0)
+    start: int
+    amount: int
+    minimum: int | None = None
+    maximum: int | None = None
+
+
+ActionConfig = Annotated[
+    SetActionConfig | SequenceActionConfig | RampActionConfig | StepActionConfig,
+    Field(discriminator="type"),
+]
 
 
 class ScenarioConfig(BaseModel):
@@ -99,6 +126,30 @@ class EmulatorConfig(BaseModel):
         if len(oids) != len(set(oids)):
             raise ValueError("metric OIDs must be unique")
         return metrics
+
+    @model_validator(mode="after")
+    def validate_scenarios(self) -> EmulatorConfig:
+        metrics = {metric.name: metric for metric in self.metrics}
+        scenario_names = [scenario.name for scenario in self.scenarios]
+        if len(scenario_names) != len(set(scenario_names)):
+            raise ValueError("scenario names must be unique")
+        for scenario in self.scenarios:
+            for action in scenario.actions:
+                metric = metrics.get(action.metric)
+                if metric is None:
+                    raise ValueError(f"unknown scenario metric: {action.metric}")
+                if isinstance(action, SetActionConfig):
+                    validate_snmp_value(metric.type, action.value)
+                elif isinstance(action, SequenceActionConfig):
+                    for value in action.values:
+                        validate_snmp_value(metric.type, value)
+                elif metric.type in {
+                    SnmpDataType.OCTET_STRING,
+                    SnmpDataType.OBJECT_IDENTIFIER,
+                    SnmpDataType.IP_ADDRESS,
+                }:
+                    raise ValueError(f"{action.type} requires a numeric metric")
+        return self
 
 
 class ConfigurationError(ValueError):
