@@ -1,0 +1,61 @@
+schema_version: 1
+agent:
+  host: 0.0.0.0
+  port: 1161
+  community: public
+metrics:
+  - name: system_description
+    oid: 1.3.6.1.2.1.1.1.0
+    type: OctetString
+    initial: Virtual network appliance
+  - name: system_uptime
+    oid: 1.3.6.1.2.1.1.3.0
+    type: TimeTicks
+    initial: 0
+  - name: cpu_usage
+    oid: 1.3.6.1.4.1.55555.1.1.0
+    type: Gauge32
+    initial: 15
+  - name: memory_usage
+    oid: 1.3.6.1.4.1.55555.1.2.0
+    type: Gauge32
+    initial: 30
+  - name: active_sessions
+    oid: 1.3.6.1.4.1.55555.1.3.0
+    type: Gauge32
+    initial: 100
+scenarios:
+  - name: resource_overload
+    repeat_every: 90
+    actions:
+      - type: ramp
+        metric: cpu_usage
+        at: 5
+        duration: 45
+        start: 15
+        end: 97
+      - type: ramp
+        metric: memory_usage
+        at: 15
+        duration: 40
+        start: 30
+        end: 92
+      - type: step
+        metric: active_sessions
+        at: 5
+        interval: 5
+        start: 100
+        amount: 250
+        maximum: 2600
+      - type: set
+        metric: cpu_usage
+        at: 70
+        value: 15
+      - type: set
+        metric: memory_usage
+        at: 70
+        value: 30
+      - type: set
+        metric: active_sessions
+        at: 70
+        value: 100

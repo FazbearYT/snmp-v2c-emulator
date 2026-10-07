@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import suppress
 
 from .adapters.pysnmp_agent import SnmpAgent
 from .config import EmulatorConfig
@@ -37,11 +36,9 @@ class EmulatorApplication:
 
     async def run(self) -> None:
         await self.agent.start()
-        scenario_task = asyncio.create_task(self.scenario_engine.run())
         try:
-            await asyncio.Event().wait()
+            async with asyncio.TaskGroup() as tasks:
+                tasks.create_task(self.scenario_engine.run())
+                tasks.create_task(asyncio.Event().wait())
         finally:
-            scenario_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await scenario_task
             await self.agent.stop()
