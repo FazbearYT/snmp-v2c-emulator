@@ -23,14 +23,14 @@
 `.python-version`, а точные версии зависимостей — в `uv.lock`.
 
 ```bash
-uv sync
-uv run snmp-emulator --config examples/device.yaml
+uv sync --locked
+uv run --locked snmp-emulator --config examples/device.yaml
 ```
 
 Для установки тестовых инструментов:
 
 ```bash
-uv sync --extra test
+uv sync --locked --extra test
 ```
 
 Активировать `.venv` вручную не требуется: `uv run` запускает команду в
@@ -50,7 +50,7 @@ snmpbulkwalk -v2c -c public 127.0.0.1:1161 1.3.6.1
 Проверить YAML без открытия UDP-порта:
 
 ```bash
-uv run snmp-emulator --config examples/device.yaml --check-config
+uv run --locked snmp-emulator --config examples/device.yaml --check-config
 ```
 
 ## Конфигурация
@@ -99,7 +99,7 @@ scenarios:
 ## Тесты
 
 ```bash
-uv run --extra test pytest
+uv run --locked --extra test pytest
 ```
 
 Набор включает модульные проверки доменной модели, конфигурации, сценариев и
