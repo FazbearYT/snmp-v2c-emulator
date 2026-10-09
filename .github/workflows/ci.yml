@@ -78,3 +78,4 @@ jobs:
           .package-venv/bin/python -m pip check
           .package-venv/bin/snmp-emulator --version
           .package-venv/bin/snmp-emulator --config examples/device.yaml --check-config
+          .package-venv/bin/python tests/installed_smoke.py

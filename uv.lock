@@ -1009,7 +1009,7 @@ requires-dist = [
     { name = "build", marker = "extra == 'quality'", specifier = ">=1.2,<2" },
     { name = "pip-audit", marker = "extra == 'quality'", specifier = "==2.10.1" },
     { name = "pydantic", specifier = ">=2.10,<3" },
-    { name = "pysnmp", specifier = ">=7.1,<8" },
+    { name = "pysnmp", specifier = ">=7.1.30,<7.2" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=9.0.3,<10" },
     { name = "pytest-asyncio", marker = "extra == 'test'", specifier = ">=1.3,<2" },
     { name = "pytest-cov", marker = "extra == 'test'", specifier = ">=6,<8" },
