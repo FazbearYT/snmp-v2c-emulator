@@ -38,6 +38,16 @@ def test_reads_existing_metric() -> None:
     assert result[0][1].tagSet == rfc1902.Gauge32.tagSet
 
 
+def test_encodes_unicode_octet_string_as_utf8() -> None:
+    oid = ObjectIdentifier.parse("1.3.6.1.4.1.55555.1.0")
+    store = MetricStore([Metric("label", oid, SnmpDataType.OCTET_STRING, "привет")])
+    instrumentation = StoreInstrumentation(store)
+
+    result = instrumentation.read_variables((rfc1902.ObjectName(oid.parts), rfc1902.Null("")))
+
+    assert result[0][1].asOctets() == "привет".encode()
+
+
 def test_reads_next_metric() -> None:
     first = ObjectIdentifier.parse("1.3.6.1.4.1.55555.1.0")
     second = ObjectIdentifier.parse("1.3.6.1.4.1.55555.2.0")
@@ -129,6 +139,33 @@ async def test_answers_get_over_udp() -> None:
         assert not status
         assert tuple(var_binds[0][0]) == next_oid.parts
         assert int(var_binds[0][1]) == 55
+    finally:
+        client_engine.close_dispatcher()
+        await agent.stop()
+
+
+@pytest.mark.asyncio
+async def test_answers_with_unicode_community_and_octet_string() -> None:
+    port = reserve_udp_port()
+    oid = ObjectIdentifier.parse("1.3.6.1.4.1.55555.1.0")
+    store = MetricStore([Metric("label", oid, SnmpDataType.OCTET_STRING, "привет")])
+    community = "тест"
+    agent = SnmpAgent("127.0.0.1", port, community, store)
+    await agent.start()
+    client_engine = engine.SnmpEngine()
+    try:
+        target = await UdpTransportTarget.create(("127.0.0.1", port), timeout=1, retries=0)
+        error, status, _, var_binds = await get_cmd(
+            client_engine,
+            CommunityData(community.encode(), mpModel=1),
+            target,
+            ContextData(),
+            ObjectType(ObjectIdentity(str(oid))),
+        )
+
+        assert error is None
+        assert not status
+        assert var_binds[0][1].asOctets() == "привет".encode()
     finally:
         client_engine.close_dispatcher()
         await agent.stop()

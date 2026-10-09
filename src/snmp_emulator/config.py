@@ -1,27 +1,72 @@
 from __future__ import annotations
 
-import math
+from decimal import ROUND_CEILING, Decimal
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
+from yaml.constructor import ConstructorError
+from yaml.nodes import MappingNode
 
-from .domain.types import SnmpDataType, validate_snmp_value
+from .domain.oid import ObjectIdentifier
+from .domain.types import SnmpDataType, encode_octet_string, validate_snmp_value
+
+NonEmptyName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+
+
+class UniqueKeySafeLoader(yaml.SafeLoader):
+    def construct_mapping(self, node: MappingNode, deep: bool = False) -> dict[Any, Any]:
+        self.flatten_mapping(node)
+        mapping: dict[Any, Any] = {}
+        for key_node, value_node in node.value:
+            key = self.construct_object(key_node, deep=deep)
+            try:
+                duplicate = key in mapping
+            except TypeError as exc:
+                raise ConstructorError(
+                    "while constructing a mapping",
+                    node.start_mark,
+                    "found an unhashable mapping key",
+                    key_node.start_mark,
+                ) from exc
+            if duplicate:
+                raise ConstructorError(
+                    "while constructing a mapping",
+                    node.start_mark,
+                    f"found duplicate key ({key!r})",
+                    key_node.start_mark,
+                )
+            mapping[key] = self.construct_object(value_node, deep=deep)
+        return mapping
 
 
 class AgentConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     host: str = "0.0.0.0"
-    port: int = Field(default=1161, ge=1, le=65535)
+    port: int = Field(default=1161, ge=1, le=65535, strict=True)
     community: str = Field(default="public", min_length=1)
+
+    @field_validator("community")
+    @classmethod
+    def validate_community(cls, value: str) -> str:
+        encode_octet_string(value)
+        return value
 
 
 class MetricConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    name: str = Field(min_length=1)
+    name: NonEmptyName
     oid: str
     type: SnmpDataType
     initial: Any
@@ -30,18 +75,7 @@ class MetricConfig(BaseModel):
     @field_validator("oid")
     @classmethod
     def validate_oid(cls, value: str) -> str:
-        parts = value.strip(".").split(".")
-        try:
-            numbers = [int(part) for part in parts]
-        except ValueError as exc:
-            raise ValueError("OID components must be integers") from exc
-        if len(numbers) < 2 or numbers[0] not in (0, 1, 2):
-            raise ValueError("invalid OID")
-        if numbers[0] < 2 and numbers[1] > 39:
-            raise ValueError("invalid second OID component")
-        if any(number < 0 for number in numbers):
-            raise ValueError("OID components cannot be negative")
-        return ".".join(str(number) for number in numbers)
+        return str(ObjectIdentifier.parse(value))
 
     @field_validator("initial")
     @classmethod
@@ -56,8 +90,8 @@ class SetActionConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     type: Literal["set"]
-    metric: str
-    at: float = Field(ge=0, allow_inf_nan=False)
+    metric: NonEmptyName
+    at: float = Field(ge=0, allow_inf_nan=False, strict=True)
     value: Any
 
 
@@ -65,9 +99,9 @@ class SequenceActionConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     type: Literal["sequence"]
-    metric: str
-    at: float = Field(default=0, ge=0, allow_inf_nan=False)
-    interval: float = Field(gt=0, allow_inf_nan=False)
+    metric: NonEmptyName
+    at: float = Field(default=0.0, ge=0, allow_inf_nan=False, strict=True)
+    interval: float = Field(gt=0, allow_inf_nan=False, strict=True)
     values: list[Any] = Field(min_length=1)
 
 
@@ -75,24 +109,24 @@ class RampActionConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     type: Literal["ramp"]
-    metric: str
-    at: float = Field(default=0, ge=0, allow_inf_nan=False)
-    duration: float = Field(gt=0, allow_inf_nan=False)
-    start: int
-    end: int
+    metric: NonEmptyName
+    at: float = Field(default=0.0, ge=0, allow_inf_nan=False, strict=True)
+    duration: float = Field(gt=0, allow_inf_nan=False, strict=True)
+    start: int = Field(strict=True)
+    end: int = Field(strict=True)
 
 
 class StepActionConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     type: Literal["step"]
-    metric: str
-    at: float = Field(default=0, ge=0, allow_inf_nan=False)
-    interval: float = Field(gt=0, allow_inf_nan=False)
-    start: int
-    amount: int
-    minimum: int | None = None
-    maximum: int | None = None
+    metric: NonEmptyName
+    at: float = Field(default=0.0, ge=0, allow_inf_nan=False, strict=True)
+    interval: float = Field(gt=0, allow_inf_nan=False, strict=True)
+    start: int = Field(strict=True)
+    amount: int = Field(strict=True)
+    minimum: int | None = Field(default=None, strict=True)
+    maximum: int | None = Field(default=None, strict=True)
 
     @model_validator(mode="after")
     def validate_limits(self) -> StepActionConfig:
@@ -110,8 +144,13 @@ ActionConfig = Annotated[
 class ScenarioConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    name: str = Field(min_length=1)
-    repeat_every: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    name: NonEmptyName
+    repeat_every: float | None = Field(
+        default=None,
+        gt=0,
+        allow_inf_nan=False,
+        strict=True,
+    )
     actions: list[ActionConfig] = Field(min_length=1)
 
 
@@ -122,6 +161,13 @@ class EmulatorConfig(BaseModel):
     agent: AgentConfig = Field(default_factory=AgentConfig)
     metrics: list[MetricConfig] = Field(min_length=1)
     scenarios: list[ScenarioConfig] = Field(default_factory=list)
+
+    @field_validator("schema_version", mode="before")
+    @classmethod
+    def validate_schema_version_type(cls, value: Any) -> Any:
+        if type(value) is not int:
+            raise ValueError("schema_version must be an integer")
+        return value
 
     @field_validator("metrics")
     @classmethod
@@ -205,8 +251,11 @@ class EmulatorConfig(BaseModel):
                 )
             return
 
-        active_duration = scenario.repeat_every - action.at
-        last_step = max(0, math.ceil(active_duration / action.interval) - 1)
+        active_duration = Decimal(str(scenario.repeat_every)) - Decimal(str(action.at))
+        step_count = (active_duration / Decimal(str(action.interval))).to_integral_value(
+            rounding=ROUND_CEILING
+        )
+        last_step = max(0, int(step_count) - 1)
         final_value = action.start + last_step * action.amount
         if action.minimum is not None:
             final_value = max(final_value, action.minimum)
@@ -222,10 +271,15 @@ class ConfigurationError(ValueError):
 def load_config(path: str | Path) -> EmulatorConfig:
     source = Path(path)
     try:
-        document = yaml.safe_load(source.read_text(encoding="utf-8"))
+        document = yaml.load(
+            source.read_text(encoding="utf-8"),
+            Loader=UniqueKeySafeLoader,
+        )
         return EmulatorConfig.model_validate(document)
     except OSError as exc:
         raise ConfigurationError(f"cannot read {source}: {exc}") from exc
+    except UnicodeError as exc:
+        raise ConfigurationError(f"cannot decode {source} as UTF-8: {exc}") from exc
     except yaml.YAMLError as exc:
         raise ConfigurationError(f"invalid YAML: {exc}") from exc
     except ValidationError as exc:

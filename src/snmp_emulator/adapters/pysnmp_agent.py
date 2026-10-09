@@ -15,7 +15,7 @@ from pysnmp.smi.instrum import AbstractMibInstrumController
 from ..domain.metric import Metric
 from ..domain.oid import ObjectIdentifier
 from ..domain.store import MetricStore
-from ..domain.types import SnmpDataType
+from ..domain.types import SnmpDataType, encode_octet_string
 
 LOGGER = logging.getLogger(__name__)
 
@@ -80,6 +80,8 @@ def encode_value(metric: Metric) -> Any:
     value = metric.value
     if metric.data_type is SnmpDataType.OBJECT_IDENTIFIER:
         value = ObjectIdentifier.parse(value).parts
+    elif metric.data_type is SnmpDataType.OCTET_STRING:
+        value = encode_octet_string(value)
     return constructors[metric.data_type](value)
 
 
@@ -135,7 +137,11 @@ class SnmpAgent:
                 udp.DOMAIN_NAME,
                 transport,
             )
-            config.add_v1_system(snmp_engine, "emulator", self.community)
+            config.add_v1_system(
+                snmp_engine,
+                "emulator",
+                encode_octet_string(self.community),
+            )
             for oid_root in ((0,), (1,), (2,)):
                 config.add_vacm_user(
                     snmp_engine,

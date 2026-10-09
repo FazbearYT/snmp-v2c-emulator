@@ -56,7 +56,7 @@ def test_rejects_fractional_ramp_for_integer_snmp_metric(tmp_path: Path) -> None
 """,
     )
 
-    with pytest.raises(ConfigurationError, match="fractional"):
+    with pytest.raises(ConfigurationError, match="valid integer"):
         load_config(config_path)
 
 
@@ -115,6 +115,92 @@ def test_reports_invalid_yaml(tmp_path: Path) -> None:
     config_path.write_text("metrics: [", encoding="utf-8")
 
     with pytest.raises(ConfigurationError, match="invalid YAML"):
+        load_config(config_path)
+
+
+def test_rejects_duplicate_yaml_keys(tmp_path: Path) -> None:
+    config_path = tmp_path / "duplicate-key.yaml"
+    config_path.write_text(
+        "schema_version: 1\nschema_version: 2\nmetrics: []\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigurationError, match="duplicate key"):
+        load_config(config_path)
+
+
+def test_reports_non_utf8_configuration(tmp_path: Path) -> None:
+    config_path = tmp_path / "invalid-encoding.yaml"
+    config_path.write_bytes(b"schema_version: \xff")
+
+    with pytest.raises(ConfigurationError, match="cannot decode.*UTF-8"):
+        load_config(config_path)
+
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        "schema_version: true\nmetrics: []\n",
+        "schema_version: 1\nagent: {port: true}\nmetrics: []\n",
+        """schema_version: 1
+metrics:
+  - {name: cpu, oid: 1.3.6.1.4.1.55555.1.0, type: Gauge32, initial: 10}
+scenarios:
+  - name: invalid
+    actions:
+      - {type: set, metric: cpu, at: true, value: 20}
+""",
+        """schema_version: 1
+metrics:
+  - {name: cpu, oid: 1.3.6.1.4.1.55555.1.0, type: Gauge32, initial: 10}
+scenarios:
+  - name: invalid
+    actions:
+      - {type: step, metric: cpu, interval: 1, start: true, amount: 0}
+""",
+    ],
+)
+def test_rejects_booleans_in_numeric_fields(tmp_path: Path, document: str) -> None:
+    config_path = tmp_path / "boolean-number.yaml"
+    config_path.write_text(document, encoding="utf-8")
+
+    with pytest.raises(ConfigurationError):
+        load_config(config_path)
+
+
+def test_rejects_extreme_step_without_leaking_overflow(tmp_path: Path) -> None:
+    config_path = write_config(
+        tmp_path,
+        """    repeat_every: 1.0e+308
+    actions:
+      - {type: step, metric: cpu, interval: 1.0e-308, start: 10, amount: 1}
+""",
+    )
+
+    with pytest.raises(ConfigurationError, match="outside its unsigned range"):
+        load_config(config_path)
+
+
+@pytest.mark.parametrize("field", ["name", "metric"])
+def test_rejects_whitespace_only_names(tmp_path: Path, field: str) -> None:
+    if field == "name":
+        document = """schema_version: 1
+metrics:
+  - {name: ' ', oid: 1.3.6.1.4.1.55555.1.0, type: Integer, initial: 1}
+"""
+    else:
+        document = """schema_version: 1
+metrics:
+  - {name: cpu, oid: 1.3.6.1.4.1.55555.1.0, type: Integer, initial: 1}
+scenarios:
+  - name: test
+    actions:
+      - {type: set, metric: ' ', at: 0, value: 1}
+"""
+    config_path = tmp_path / f"blank-{field}.yaml"
+    config_path.write_text(document, encoding="utf-8")
+
+    with pytest.raises(ConfigurationError, match="at least 1 character"):
         load_config(config_path)
 
 

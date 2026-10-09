@@ -4,6 +4,8 @@ import ipaddress
 from enum import StrEnum
 from typing import Any
 
+MAX_OCTET_STRING_BYTES = 65535
+
 
 class SnmpDataType(StrEnum):
     INTEGER = "Integer"
@@ -16,16 +18,31 @@ class SnmpDataType(StrEnum):
     COUNTER64 = "Counter64"
 
 
+def encode_octet_string(value: str) -> bytes:
+    try:
+        encoded = value.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise ValueError("OctetString value must be valid Unicode text") from exc
+    if len(encoded) > MAX_OCTET_STRING_BYTES:
+        raise ValueError(f"OctetString value cannot exceed {MAX_OCTET_STRING_BYTES} UTF-8 bytes")
+    return encoded
+
+
 def validate_snmp_value(data_type: SnmpDataType, value: Any) -> Any:
     if data_type is SnmpDataType.OCTET_STRING:
         if not isinstance(value, str):
             raise ValueError("OctetString value must be a string")
+        encode_octet_string(value)
         return value
     if data_type is SnmpDataType.OBJECT_IDENTIFIER:
         from .oid import ObjectIdentifier
 
-        return str(ObjectIdentifier.parse(str(value)))
+        if not isinstance(value, str):
+            raise ValueError("ObjectIdentifier value must be a string")
+        return str(ObjectIdentifier.parse(value))
     if data_type is SnmpDataType.IP_ADDRESS:
+        if not isinstance(value, str):
+            raise ValueError("IpAddress value must be a string")
         return str(ipaddress.IPv4Address(value))
     if isinstance(value, bool) or not isinstance(value, int):
         raise ValueError(f"{data_type.value} value must be an integer")

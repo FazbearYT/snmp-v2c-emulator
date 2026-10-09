@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+MAX_OID_COMPONENTS = 128
+MAX_OID_COMPONENT = 2**32 - 1
+
 
 @dataclass(frozen=True, order=True, slots=True)
 class ObjectIdentifier:
@@ -16,6 +19,10 @@ class ObjectIdentifier:
             raise ValueError("second OID component must be at most 39")
         if any(part < 0 for part in self.parts):
             raise ValueError("OID components cannot be negative")
+        if len(self.parts) > MAX_OID_COMPONENTS:
+            raise ValueError(f"OID cannot exceed {MAX_OID_COMPONENTS} components")
+        if any(part > MAX_OID_COMPONENT for part in self.parts):
+            raise ValueError(f"OID components cannot exceed {MAX_OID_COMPONENT}")
 
     @classmethod
     def parse(cls, value: str) -> ObjectIdentifier:
