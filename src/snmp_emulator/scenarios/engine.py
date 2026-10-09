@@ -26,7 +26,7 @@ def build_scenarios(configs: list[ScenarioConfig]) -> tuple[Scenario, ...]:
     scenarios: list[Scenario] = []
     for item in configs:
         actions: list[Action] = []
-        for action in item.actions:
+        for action in sorted(item.actions, key=lambda candidate: candidate.at):
             if isinstance(action, SetActionConfig):
                 actions.append(SetAction(action.metric, action.at, action.value))
             elif isinstance(action, SequenceActionConfig):

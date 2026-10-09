@@ -59,3 +59,16 @@ def test_reports_runtime_error(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(cli, "EmulatorApplication", FailingApplication)
 
     assert cli.main(["--config", str(EXAMPLE_CONFIG)]) == 1
+
+
+def test_reports_unexpected_application_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FailingApplication:
+        def __init__(self, config: object) -> None:
+            pass
+
+        async def run(self) -> None:
+            raise RuntimeError("scenario failed")
+
+    monkeypatch.setattr(cli, "EmulatorApplication", FailingApplication)
+
+    assert cli.main(["--config", str(EXAMPLE_CONFIG)]) == 1

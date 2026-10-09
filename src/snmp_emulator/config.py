@@ -57,7 +57,7 @@ class SetActionConfig(BaseModel):
 
     type: Literal["set"]
     metric: str
-    at: float = Field(ge=0)
+    at: float = Field(ge=0, allow_inf_nan=False)
     value: Any
 
 
@@ -66,8 +66,8 @@ class SequenceActionConfig(BaseModel):
 
     type: Literal["sequence"]
     metric: str
-    at: float = Field(default=0, ge=0)
-    interval: float = Field(gt=0)
+    at: float = Field(default=0, ge=0, allow_inf_nan=False)
+    interval: float = Field(gt=0, allow_inf_nan=False)
     values: list[Any] = Field(min_length=1)
 
 
@@ -76,8 +76,8 @@ class RampActionConfig(BaseModel):
 
     type: Literal["ramp"]
     metric: str
-    at: float = Field(default=0, ge=0)
-    duration: float = Field(gt=0)
+    at: float = Field(default=0, ge=0, allow_inf_nan=False)
+    duration: float = Field(gt=0, allow_inf_nan=False)
     start: int
     end: int
 
@@ -87,8 +87,8 @@ class StepActionConfig(BaseModel):
 
     type: Literal["step"]
     metric: str
-    at: float = Field(default=0, ge=0)
-    interval: float = Field(gt=0)
+    at: float = Field(default=0, ge=0, allow_inf_nan=False)
+    interval: float = Field(gt=0, allow_inf_nan=False)
     start: int
     amount: int
     minimum: int | None = None
@@ -111,7 +111,7 @@ class ScenarioConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(min_length=1)
-    repeat_every: float | None = Field(default=None, gt=0)
+    repeat_every: float | None = Field(default=None, gt=0, allow_inf_nan=False)
     actions: list[ActionConfig] = Field(min_length=1)
 
 
@@ -138,10 +138,25 @@ class EmulatorConfig(BaseModel):
     def validate_scenarios(self) -> EmulatorConfig:
         metrics = {metric.name: metric for metric in self.metrics}
         scenario_names = [scenario.name for scenario in self.scenarios]
+        metric_owners: dict[str, str] = {}
         if len(scenario_names) != len(set(scenario_names)):
             raise ValueError("scenario names must be unique")
         for scenario in self.scenarios:
+            action_moments: set[tuple[str, float]] = set()
             for action in scenario.actions:
+                moment = (action.metric, action.at)
+                if moment in action_moments:
+                    raise ValueError(
+                        f"scenario {scenario.name} has multiple actions for "
+                        f"{action.metric} at={action.at}"
+                    )
+                action_moments.add(moment)
+                owner = metric_owners.setdefault(action.metric, scenario.name)
+                if owner != scenario.name:
+                    raise ValueError(
+                        f"metric {action.metric} is written by multiple scenarios: "
+                        f"{owner}, {scenario.name}"
+                    )
                 if scenario.repeat_every is not None and action.at >= scenario.repeat_every:
                     raise ValueError(
                         f"scenario action at={action.at} must be less than "

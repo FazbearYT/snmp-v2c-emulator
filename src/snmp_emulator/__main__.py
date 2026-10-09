@@ -47,6 +47,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     except OSError as exc:
         logging.getLogger(__name__).error("emulator failed: %s", exc)
         return 1
+    except Exception as exc:
+        logging.getLogger(__name__).error("emulator stopped unexpectedly: %s", exc)
+        return 1
     return 0
 
 

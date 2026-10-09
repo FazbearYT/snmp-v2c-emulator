@@ -116,3 +116,64 @@ def test_reports_invalid_yaml(tmp_path: Path) -> None:
 
     with pytest.raises(ConfigurationError, match="invalid YAML"):
         load_config(config_path)
+
+
+@pytest.mark.parametrize(
+    "scenario",
+    [
+        """    repeat_every: .inf
+    actions:
+      - {type: set, metric: cpu, at: 1, value: 20}
+""",
+        """    actions:
+      - {type: set, metric: cpu, at: .inf, value: 20}
+""",
+        """    actions:
+      - {type: sequence, metric: cpu, interval: .nan, values: [10, 20]}
+""",
+        """    actions:
+      - {type: ramp, metric: cpu, duration: .inf, start: 10, end: 20}
+""",
+        """    actions:
+      - {type: step, metric: cpu, interval: .inf, start: 10, amount: 1, maximum: 20}
+""",
+    ],
+)
+def test_rejects_non_finite_scenario_times(tmp_path: Path, scenario: str) -> None:
+    with pytest.raises(ConfigurationError, match="finite number"):
+        load_config(write_config(tmp_path, scenario))
+
+
+def test_rejects_two_actions_for_same_metric_at_same_time(tmp_path: Path) -> None:
+    config_path = write_config(
+        tmp_path,
+        """    actions:
+      - {type: set, metric: cpu, at: 1, value: 20}
+      - {type: set, metric: cpu, at: 1, value: 30}
+""",
+    )
+
+    with pytest.raises(ConfigurationError, match="multiple actions"):
+        load_config(config_path)
+
+
+def test_rejects_multiple_scenarios_writing_same_metric(tmp_path: Path) -> None:
+    config_path = tmp_path / "conflict.yaml"
+    config_path.write_text(
+        """
+schema_version: 1
+metrics:
+  - {name: cpu, oid: 1.3.6.1.4.1.55555.1.0, type: Gauge32, initial: 10}
+scenarios:
+  - name: first
+    actions:
+      - {type: set, metric: cpu, at: 1, value: 20}
+  - name: second
+    actions:
+      - {type: set, metric: cpu, at: 2, value: 30}
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigurationError, match="written by multiple scenarios"):
+        load_config(config_path)

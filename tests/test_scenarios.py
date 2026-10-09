@@ -91,12 +91,22 @@ def test_builds_every_action_type_from_configuration() -> None:
     assert len(scenarios) == 1
     assert [type(action) for action in scenarios[0].actions] == [
         RampAction,
-        RampAction,
         StepAction,
+        RampAction,
         SetAction,
         SetAction,
         SetAction,
     ]
+
+
+def test_build_orders_actions_by_start_time() -> None:
+    config = load_config("examples/device.yaml")
+    scenario_config = config.scenarios[0]
+    scenario_config.actions.reverse()
+
+    scenario = build_scenarios([scenario_config])[0]
+
+    assert [action.at for action in scenario.actions] == [2, 10]
 
 
 @pytest.mark.asyncio
