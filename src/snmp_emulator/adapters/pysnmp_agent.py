@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import socket
 from typing import Any
 
 from pysnmp.carrier.asyncio.dgram import udp
@@ -17,6 +18,18 @@ from ..domain.store import MetricStore
 from ..domain.types import SnmpDataType
 
 LOGGER = logging.getLogger(__name__)
+
+
+def bind_udp_socket(host: str, port: int) -> socket.socket:
+    server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        server_socket.bind((host, port))
+    except OSError as exc:
+        server_socket.close()
+        raise OSError(f"cannot bind udp://{host}:{port}: {exc}") from exc
+    return server_socket
 
 
 def encode_value(metric: Metric) -> Any:
@@ -75,27 +88,36 @@ class SnmpAgent:
         self._engine: engine.SnmpEngine | None = None
 
     async def start(self) -> None:
+        if self._engine is not None:
+            raise RuntimeError("SNMP agent is already running")
+        server_socket = bind_udp_socket(self.host, self.port)
         snmp_engine = engine.SnmpEngine()
-        config.add_transport(
-            snmp_engine,
-            udp.DOMAIN_NAME,
-            udp.UdpAsyncioTransport().open_server_mode((self.host, self.port)),
-        )
-        config.add_v1_system(snmp_engine, "emulator", self.community)
-        for oid_root in ((0,), (1,), (2,)):
-            config.add_vacm_user(
+        try:
+            transport = udp.UdpAsyncioTransport().open_server_mode(sock=server_socket)
+            config.add_transport(
                 snmp_engine,
-                2,
-                "emulator",
-                "noAuthNoPriv",
-                readSubTree=oid_root,
+                udp.DOMAIN_NAME,
+                transport,
             )
-        snmp_context = context.SnmpContext(snmp_engine)
-        snmp_context.unregister_context_name(b"")
-        snmp_context.register_context_name(b"", StoreInstrumentation(self.store))
-        cmdrsp.GetCommandResponder(snmp_engine, snmp_context)
-        cmdrsp.NextCommandResponder(snmp_engine, snmp_context)
-        cmdrsp.BulkCommandResponder(snmp_engine, snmp_context)
+            config.add_v1_system(snmp_engine, "emulator", self.community)
+            for oid_root in ((0,), (1,), (2,)):
+                config.add_vacm_user(
+                    snmp_engine,
+                    2,
+                    "emulator",
+                    "noAuthNoPriv",
+                    readSubTree=oid_root,
+                )
+            snmp_context = context.SnmpContext(snmp_engine)
+            snmp_context.unregister_context_name(b"")
+            snmp_context.register_context_name(b"", StoreInstrumentation(self.store))
+            cmdrsp.GetCommandResponder(snmp_engine, snmp_context)
+            cmdrsp.NextCommandResponder(snmp_engine, snmp_context)
+            cmdrsp.BulkCommandResponder(snmp_engine, snmp_context)
+        except Exception:
+            snmp_engine.close_dispatcher()
+            server_socket.close()
+            raise
         self._engine = snmp_engine
         await asyncio.sleep(0)
         LOGGER.info("listening on udp://%s:%d", self.host, self.port)

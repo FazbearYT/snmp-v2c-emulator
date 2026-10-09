@@ -243,3 +243,32 @@ async def test_ignores_request_with_wrong_community() -> None:
     finally:
         client_engine.close_dispatcher()
         await agent.stop()
+
+
+@pytest.mark.asyncio
+async def test_rejects_second_agent_on_same_udp_port() -> None:
+    port = reserve_udp_port()
+    oid = ObjectIdentifier.parse("1.3.6.1.4.1.55555.1.0")
+    store = MetricStore([Metric("cpu", oid, SnmpDataType.GAUGE32, 25)])
+    first = SnmpAgent("127.0.0.1", port, "public", store)
+    second = SnmpAgent("127.0.0.1", port, "public", store)
+    await first.start()
+    try:
+        with pytest.raises(OSError, match="cannot bind"):
+            await second.start()
+    finally:
+        await first.stop()
+
+
+@pytest.mark.asyncio
+async def test_rejects_starting_same_agent_twice() -> None:
+    port = reserve_udp_port()
+    oid = ObjectIdentifier.parse("1.3.6.1.4.1.55555.1.0")
+    store = MetricStore([Metric("cpu", oid, SnmpDataType.GAUGE32, 25)])
+    agent = SnmpAgent("127.0.0.1", port, "public", store)
+    await agent.start()
+    try:
+        with pytest.raises(RuntimeError, match="already running"):
+            await agent.start()
+    finally:
+        await agent.stop()

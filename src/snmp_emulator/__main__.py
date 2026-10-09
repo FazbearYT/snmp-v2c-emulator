@@ -44,6 +44,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         asyncio.run(EmulatorApplication(config).run())
     except KeyboardInterrupt:
         logging.getLogger(__name__).info("emulator stopped")
+    except OSError as exc:
+        logging.getLogger(__name__).error("emulator failed: %s", exc)
+        return 1
     return 0
 
 
