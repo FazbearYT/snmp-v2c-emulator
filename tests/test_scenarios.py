@@ -103,6 +103,43 @@ def test_ramp_interpolates_value() -> None:
     assert action.value_at(20) == (True, 90)
 
 
+def test_ramp_preserves_counter64_maximum_exactly() -> None:
+    maximum = 2**64 - 1
+    action = RampAction("counter", at=0, duration=1, start=maximum, end=maximum)
+
+    assert action.value_at(0) == (True, maximum)
+    assert action.value_at(0.5) == (True, maximum)
+    assert action.value_at(1) == (True, maximum)
+
+
+def test_repeating_scenario_uses_decimal_cycle_boundaries() -> None:
+    clock = ManualClock()
+    store = build_store()
+    scenario = Scenario(
+        "decimal-cycle",
+        (SetAction("cpu", 0.05, 80),),
+        repeat_every=0.1,
+    )
+    engine = ScenarioEngine(store, (scenario,), clock)
+    engine.start()
+
+    clock.value = 0.29
+    engine.tick()
+    assert store.get_by_name("cpu").value == 80
+
+    clock.value = 0.3
+    engine.tick()
+    assert store.get_by_name("cpu").value == 10
+
+
+def test_tiny_intervals_do_not_overflow_time_arithmetic() -> None:
+    sequence = SequenceAction("cpu", at=0, interval=5e-324, values=(10, 20))
+    step = StepAction("cpu", at=0, interval=5e-324, start=10, amount=1, maximum=20)
+
+    assert sequence.value_at(1) == (True, 20)
+    assert step.value_at(1) == (True, 20)
+
+
 def test_step_respects_maximum() -> None:
     action = StepAction("cpu", at=0, interval=2, start=10, amount=15, maximum=40)
 

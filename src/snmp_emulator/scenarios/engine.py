@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from decimal import Decimal
 
 from ..config import (
     RampActionConfig,
@@ -11,7 +12,15 @@ from ..config import (
     StepActionConfig,
 )
 from ..domain.store import MetricStore
-from .actions import Action, RampAction, SequenceAction, SetAction, StepAction
+from .actions import (
+    Action,
+    RampAction,
+    SequenceAction,
+    SetAction,
+    StepAction,
+    decimal_divmod,
+    decimal_number,
+)
 from .clock import Clock, MonotonicClock
 
 
@@ -76,12 +85,12 @@ class ScenarioEngine:
         self.scenarios = scenarios
         self.clock = clock or MonotonicClock()
         self.tick_interval = tick_interval
-        self._started_at: float | None = None
+        self._started_at: Decimal | None = None
         self._scenario_baselines: dict[str, dict[str, object]] = {}
         self._scenario_cycles: dict[str, int] = {}
 
     def start(self) -> None:
-        self._started_at = self.clock.now()
+        self._started_at = decimal_number(self.clock.now())
         self._scenario_baselines = {}
         self._scenario_cycles = {}
         for scenario in self.scenarios:
@@ -98,16 +107,16 @@ class ScenarioEngine:
     def tick(self) -> None:
         if self._started_at is None:
             self.start()
-        elapsed = self.clock.now() - self._started_at
+        elapsed = decimal_number(self.clock.now()) - self._started_at
         for scenario in self.scenarios:
             local_elapsed = elapsed
             if scenario.repeat_every is not None:
-                cycle = int(elapsed // scenario.repeat_every)
+                repeat_every = decimal_number(scenario.repeat_every)
+                cycle, local_elapsed = decimal_divmod(elapsed, repeat_every)
                 if cycle != self._scenario_cycles[scenario.name]:
                     for metric_name, value in self._scenario_baselines[scenario.name].items():
                         self.store.update(metric_name, value)
                     self._scenario_cycles[scenario.name] = cycle
-                local_elapsed %= scenario.repeat_every
             for action in scenario.actions:
                 active, value = action.value_at(local_elapsed)
                 if active:
