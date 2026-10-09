@@ -1,7 +1,9 @@
 import asyncio
 import socket
+from typing import Any
 
 import pytest
+from pyasn1.codec.ber import decoder, encoder
 from pysnmp.entity import engine
 from pysnmp.hlapi.v3arch.asyncio import (
     CommunityData,
@@ -13,13 +15,16 @@ from pysnmp.hlapi.v3arch.asyncio import (
     get_cmd,
     next_cmd,
 )
-from pysnmp.proto import rfc1902
+from pysnmp.proto import rfc1901, rfc1902
+from pysnmp.proto.api import v2c
 from pysnmp.smi import exval
 
 from snmp_emulator.adapters.pysnmp_agent import (
+    LenientGetBulkRequestPdu,
     ManagedUdpTransport,
     SnmpAgent,
     StoreInstrumentation,
+    V2cMessage,
 )
 from snmp_emulator.domain.metric import Metric
 from snmp_emulator.domain.oid import ObjectIdentifier
@@ -86,6 +91,35 @@ def reserve_udp_port() -> int:
         return sock.getsockname()[1]
 
 
+def encode_bulk_request(
+    oid: ObjectIdentifier,
+    non_repeaters: int,
+    max_repetitions: int,
+) -> bytes:
+    pdu = LenientGetBulkRequestPdu()
+    v2c.apiBulkPDU.set_defaults(pdu)
+    v2c.apiBulkPDU.set_non_repeaters(pdu, non_repeaters)
+    v2c.apiBulkPDU.set_max_repetitions(pdu, max_repetitions)
+    v2c.apiPDU.set_varbinds(pdu, [(rfc1902.ObjectName(oid.parts), rfc1902.Null(""))])
+    message = V2cMessage()
+    v2c.apiMessage.set_defaults(message)
+    v2c.apiMessage.set_community(message, b"public")
+    v2c.apiMessage.set_pdu(message, pdu)
+    return encoder.encode(message)
+
+
+async def exchange_raw_datagram(port: int, payload: bytes) -> Any:
+    loop = asyncio.get_running_loop()
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        sock.setblocking(False)
+        await loop.sock_sendto(sock, payload, ("127.0.0.1", port))
+        response = await asyncio.wait_for(loop.sock_recv(sock, 65535), timeout=1)
+    message, trailing = decoder.decode(response, asn1Spec=rfc1901.Message())
+    assert not trailing
+    return v2c.apiMessage.get_pdu(message)
+
+
 @pytest.mark.asyncio
 async def test_answers_get_over_udp() -> None:
     port = reserve_udp_port()
@@ -139,6 +173,95 @@ async def test_answers_get_over_udp() -> None:
         assert not status
         assert tuple(var_binds[0][0]) == next_oid.parts
         assert int(var_binds[0][1]) == 55
+    finally:
+        client_engine.close_dispatcher()
+        await agent.stop()
+
+
+@pytest.mark.asyncio
+async def test_rejects_snmp_v1_request() -> None:
+    port = reserve_udp_port()
+    oid = ObjectIdentifier.parse("1.3.6.1.4.1.55555.1.0")
+    store = MetricStore([Metric("cpu", oid, SnmpDataType.GAUGE32, 31)])
+    agent = SnmpAgent("127.0.0.1", port, "public", store)
+    await agent.start()
+    client_engine = engine.SnmpEngine()
+    try:
+        target = await UdpTransportTarget.create(("127.0.0.1", port), timeout=0.1, retries=0)
+        error, status, _, var_binds = await get_cmd(
+            client_engine,
+            CommunityData("public", mpModel=0),
+            target,
+            ContextData(),
+            ObjectType(ObjectIdentity(str(oid))),
+        )
+
+        assert error is not None
+        assert not status
+        assert not var_binds
+    finally:
+        client_engine.close_dispatcher()
+        await agent.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("non_repeaters", "max_repetitions", "expected_values"),
+    [(0, 0, []), (0, -1, []), (-1, 1, [2])],
+)
+async def test_normalizes_getbulk_boundaries(
+    non_repeaters: int,
+    max_repetitions: int,
+    expected_values: list[int],
+) -> None:
+    port = reserve_udp_port()
+    first = ObjectIdentifier.parse("1.3.6.1.4.1.55555.1.0")
+    second = ObjectIdentifier.parse("1.3.6.1.4.1.55555.2.0")
+    store = MetricStore(
+        [
+            Metric("first", first, SnmpDataType.INTEGER, 1),
+            Metric("second", second, SnmpDataType.INTEGER, 2),
+        ]
+    )
+    agent = SnmpAgent("127.0.0.1", port, "public", store)
+    await agent.start()
+    try:
+        response_pdu = await exchange_raw_datagram(
+            port,
+            encode_bulk_request(first, non_repeaters, max_repetitions),
+        )
+
+        assert int(v2c.apiPDU.get_error_status(response_pdu)) == 0
+        assert int(v2c.apiPDU.get_error_index(response_pdu)) == 0
+        assert [int(value) for _, value in v2c.apiPDU.get_varbinds(response_pdu)] == (
+            expected_values
+        )
+    finally:
+        await agent.stop()
+
+
+@pytest.mark.asyncio
+async def test_returns_too_big_for_oversized_response() -> None:
+    port = reserve_udp_port()
+    oid = ObjectIdentifier.parse("1.3.6.1.4.1.55555.1.0")
+    store = MetricStore([Metric("payload", oid, SnmpDataType.OCTET_STRING, "x" * 65535)])
+    agent = SnmpAgent("127.0.0.1", port, "public", store)
+    await agent.start()
+    client_engine = engine.SnmpEngine()
+    try:
+        target = await UdpTransportTarget.create(("127.0.0.1", port), timeout=1, retries=0)
+        error, status, index, var_binds = await get_cmd(
+            client_engine,
+            CommunityData("public", mpModel=1),
+            target,
+            ContextData(),
+            ObjectType(ObjectIdentity(str(oid))),
+        )
+
+        assert error is None
+        assert status.prettyPrint() == "tooBig"
+        assert int(index) == 0
+        assert not var_binds
     finally:
         client_engine.close_dispatcher()
         await agent.stop()

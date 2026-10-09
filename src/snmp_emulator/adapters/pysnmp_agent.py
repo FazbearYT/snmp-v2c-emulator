@@ -5,10 +5,14 @@ import logging
 import socket
 from typing import Any
 
+from pyasn1.codec.ber import encoder
+from pyasn1.type import namedtype, univ
 from pysnmp.carrier.asyncio.dgram import udp
 from pysnmp.entity import config, engine
 from pysnmp.entity.rfc3413 import cmdrsp, context
-from pysnmp.proto import rfc1902
+from pysnmp.proto import rfc1901, rfc1902, rfc1905
+from pysnmp.proto.api import v2c
+from pysnmp.proto.mpmod.rfc2576 import SnmpV2cMessageProcessingModel
 from pysnmp.smi import exval
 from pysnmp.smi.instrum import AbstractMibInstrumController
 
@@ -18,6 +22,106 @@ from ..domain.store import MetricStore
 from ..domain.types import SnmpDataType, encode_octet_string
 
 LOGGER = logging.getLogger(__name__)
+
+
+class LenientBulkPdu(rfc1905.BulkPDU):
+    componentType = namedtype.NamedTypes(  # noqa: N815
+        namedtype.NamedType("request-id", rfc1902.Integer32()),
+        namedtype.NamedType("non-repeaters", univ.Integer()),
+        namedtype.NamedType("max-repetitions", univ.Integer()),
+        namedtype.NamedType("variable-bindings", rfc1905.VarBindList()),
+    )
+
+
+class LenientGetBulkRequestPdu(LenientBulkPdu):
+    tagSet = rfc1905.GetBulkRequestPDU.tagSet  # noqa: N815
+
+
+class V2cPdus(univ.Choice):
+    componentType = namedtype.NamedTypes(  # noqa: N815
+        namedtype.NamedType("get-request", rfc1905.GetRequestPDU()),
+        namedtype.NamedType("get-next-request", rfc1905.GetNextRequestPDU()),
+        namedtype.NamedType("get-bulk-request", LenientGetBulkRequestPdu()),
+        namedtype.NamedType("response", rfc1905.ResponsePDU()),
+        namedtype.NamedType("set-request", rfc1905.SetRequestPDU()),
+        namedtype.NamedType("inform-request", rfc1905.InformRequestPDU()),
+        namedtype.NamedType("snmpV2-trap", rfc1905.SNMPv2TrapPDU()),
+        namedtype.NamedType("report", rfc1905.ReportPDU()),
+    )
+
+
+class V2cMessage(univ.Sequence):
+    componentType = namedtype.NamedTypes(  # noqa: N815
+        namedtype.NamedType("version", rfc1901.version),
+        namedtype.NamedType("community", univ.OctetString()),
+        namedtype.NamedType("data", V2cPdus()),
+    )
+
+
+class V2cMessageProcessingModel(SnmpV2cMessageProcessingModel):
+    SNMP_MSG_SPEC = V2cMessage
+
+
+class ResponseSizeGuard:
+    def send_varbinds(
+        self,
+        snmp_engine: engine.SnmpEngine,
+        state_reference: Any,
+        error_status: Any,
+        error_index: Any,
+        var_binds: list[tuple[Any, Any]],
+    ) -> None:
+        pending_requests = self._CommandResponderBase__pendingReqs  # type: ignore[attr-defined]
+        pending = pending_requests[state_reference]
+        response_pdu = pending[7]
+        max_response_size = int(pending[9])
+        v2c.apiPDU.set_error_status(response_pdu, error_status)
+        v2c.apiPDU.set_error_index(response_pdu, error_index)
+        v2c.apiPDU.set_varbinds(response_pdu, var_binds)
+        if len(encoder.encode(response_pdu)) > max_response_size:
+            error_status = "tooBig"
+            error_index = 0
+            var_binds = []
+        super().send_varbinds(  # type: ignore[misc]
+            snmp_engine,
+            state_reference,
+            error_status,
+            error_index,
+            var_binds,
+        )
+
+
+class V2cGetCommandResponder(ResponseSizeGuard, cmdrsp.GetCommandResponder):
+    pass
+
+
+class V2cNextCommandResponder(ResponseSizeGuard, cmdrsp.NextCommandResponder):
+    pass
+
+
+class V2cBulkCommandResponder(ResponseSizeGuard, cmdrsp.BulkCommandResponder):
+    def handle_management_operation(
+        self,
+        snmp_engine: engine.SnmpEngine,
+        state_reference: Any,
+        context_name: Any,
+        pdu: Any,
+    ) -> None:
+        non_repeaters = max(int(v2c.apiBulkPDU.get_non_repeaters(pdu)), 0)
+        max_repetitions = max(int(v2c.apiBulkPDU.get_max_repetitions(pdu)), 0)
+        request_var_binds = v2c.apiPDU.get_varbinds(pdu)
+        non_repeater_count = min(non_repeaters, len(request_var_binds))
+        repeater_count = max(len(request_var_binds) - non_repeater_count, 0)
+        if non_repeater_count == 0 and (max_repetitions == 0 or repeater_count == 0):
+            self.send_varbinds(snmp_engine, state_reference, 0, 0, [])
+            self.release_state_information(state_reference)
+            return
+        super().handle_management_operation(
+            snmp_engine,
+            state_reference,
+            context_name,
+            pdu,
+        )
 
 
 class ManagedUdpTransport(udp.UdpAsyncioTransport):
@@ -130,6 +234,9 @@ class SnmpAgent:
         server_socket = bind_udp_socket(self.host, self.port)
         snmp_engine = engine.SnmpEngine()
         try:
+            snmp_engine.message_processing_subsystems.pop(0, None)
+            snmp_engine.security_models.pop(1, None)
+            snmp_engine.message_processing_subsystems[1] = V2cMessageProcessingModel()
             transport = ManagedUdpTransport()
             transport.open_server_mode(sock=server_socket)
             config.add_transport(
@@ -153,9 +260,9 @@ class SnmpAgent:
             snmp_context = context.SnmpContext(snmp_engine)
             snmp_context.unregister_context_name(b"")
             snmp_context.register_context_name(b"", StoreInstrumentation(self.store))
-            cmdrsp.GetCommandResponder(snmp_engine, snmp_context)
-            cmdrsp.NextCommandResponder(snmp_engine, snmp_context)
-            cmdrsp.BulkCommandResponder(snmp_engine, snmp_context)
+            V2cGetCommandResponder(snmp_engine, snmp_context)
+            V2cNextCommandResponder(snmp_engine, snmp_context)
+            V2cBulkCommandResponder(snmp_engine, snmp_context)
             await transport.wait_ready()
         except BaseException:
             snmp_engine.close_dispatcher()
