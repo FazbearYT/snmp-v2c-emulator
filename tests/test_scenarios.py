@@ -1,11 +1,15 @@
+import asyncio
 from dataclasses import dataclass
 
+import pytest
+
+from snmp_emulator.config import load_config
 from snmp_emulator.domain.metric import Metric
 from snmp_emulator.domain.oid import ObjectIdentifier
 from snmp_emulator.domain.store import MetricStore
 from snmp_emulator.domain.types import SnmpDataType
 from snmp_emulator.scenarios.actions import RampAction, SequenceAction, SetAction, StepAction
-from snmp_emulator.scenarios.engine import Scenario, ScenarioEngine
+from snmp_emulator.scenarios.engine import Scenario, ScenarioEngine, build_scenarios
 
 
 @dataclass
@@ -77,3 +81,39 @@ def test_step_respects_maximum() -> None:
 
     assert action.value_at(2)[1] == 25
     assert action.value_at(10)[1] == 40
+
+
+def test_builds_every_action_type_from_configuration() -> None:
+    config = load_config("examples/overload.yaml")
+
+    scenarios = build_scenarios(config.scenarios)
+
+    assert len(scenarios) == 1
+    assert [type(action) for action in scenarios[0].actions] == [
+        RampAction,
+        RampAction,
+        StepAction,
+        SetAction,
+        SetAction,
+        SetAction,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_run_ticks_until_cancelled() -> None:
+    clock = ManualClock()
+    store = build_store()
+    engine = ScenarioEngine(
+        store,
+        (Scenario("load", (SetAction("cpu", 0, 80),)),),
+        clock,
+        tick_interval=0.001,
+    )
+
+    task = asyncio.create_task(engine.run())
+    await asyncio.sleep(0.01)
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert store.get_by_name("cpu").value == 80

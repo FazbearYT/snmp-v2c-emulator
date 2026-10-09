@@ -108,3 +108,11 @@ def test_rejects_inverted_step_limits(tmp_path: Path) -> None:
 
     with pytest.raises(ConfigurationError, match="minimum cannot exceed maximum"):
         load_config(config_path)
+
+
+def test_reports_invalid_yaml(tmp_path: Path) -> None:
+    config_path = tmp_path / "invalid.yaml"
+    config_path.write_text("metrics: [", encoding="utf-8")
+
+    with pytest.raises(ConfigurationError, match="invalid YAML"):
+        load_config(config_path)

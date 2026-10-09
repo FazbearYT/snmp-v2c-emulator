@@ -96,11 +96,7 @@ class StepActionConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_limits(self) -> StepActionConfig:
-        if (
-            self.minimum is not None
-            and self.maximum is not None
-            and self.minimum > self.maximum
-        ):
+        if self.minimum is not None and self.maximum is not None and self.minimum > self.maximum:
             raise ValueError("step minimum cannot exceed maximum")
         return self
 
@@ -146,10 +142,7 @@ class EmulatorConfig(BaseModel):
             raise ValueError("scenario names must be unique")
         for scenario in self.scenarios:
             for action in scenario.actions:
-                if (
-                    scenario.repeat_every is not None
-                    and action.at >= scenario.repeat_every
-                ):
+                if scenario.repeat_every is not None and action.at >= scenario.repeat_every:
                     raise ValueError(
                         f"scenario action at={action.at} must be less than "
                         f"repeat_every={scenario.repeat_every}"

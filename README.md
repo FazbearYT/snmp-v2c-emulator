@@ -19,20 +19,22 @@
 
 ## Быстрый старт
 
-Требуется Python 3.11 или новее.
+Для запуска используется `uv`. Версия Python 3.13 закреплена в
+`.python-version`, а точные версии зависимостей — в `uv.lock`.
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -e ".[test]"
-snmp-emulator --config examples/device.yaml
+uv sync
+uv run snmp-emulator --config examples/device.yaml
 ```
 
-В PowerShell активация окружения выполняется командой:
+Для установки тестовых инструментов:
 
-```powershell
-.venv\Scripts\Activate.ps1
+```bash
+uv sync --extra test
 ```
+
+Активировать `.venv` вручную не требуется: `uv run` запускает команду в
+окружении проекта.
 
 Пример использует UDP-порт 1161, поэтому для запуска не требуются повышенные
 привилегии.
@@ -48,7 +50,7 @@ snmpbulkwalk -v2c -c public 127.0.0.1:1161 1.3.6.1
 Проверить YAML без открытия UDP-порта:
 
 ```bash
-snmp-emulator --config examples/device.yaml --check-config
+uv run snmp-emulator --config examples/device.yaml --check-config
 ```
 
 ## Конфигурация
@@ -97,7 +99,7 @@ scenarios:
 ## Тесты
 
 ```bash
-pytest
+uv run --extra test pytest
 ```
 
 Набор включает модульные проверки доменной модели, конфигурации, сценариев и

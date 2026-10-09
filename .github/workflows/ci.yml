@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install uv
+        run: python -m pip install uv
+      - name: Install project
+        run: uv sync --frozen --python "${{ matrix.python-version }}" --extra test
+      - name: Run tests
+        run: >-
+          uv run --frozen --python "${{ matrix.python-version }}" --extra test
+          pytest --cov=snmp_emulator --cov-report=term-missing --cov-fail-under=85
+
+  quality:
+    name: Quality and package build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install uv
+        run: python -m pip install uv
+      - name: Install project
+        run: uv sync --frozen --python "3.13" --extra test --extra quality
+      - name: Lint
+        run: uv run --frozen --python "3.13" --all-extras ruff check .
+      - name: Check formatting
+        run: uv run --frozen --python "3.13" --all-extras ruff format --check .
+      - name: Validate example configuration
+        run: >-
+          uv run --frozen --python "3.13" --all-extras
+          python -m snmp_emulator --config examples/device.yaml --check-config
+      - name: Build package
+        run: uv build

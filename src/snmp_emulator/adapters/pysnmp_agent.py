@@ -16,7 +16,6 @@ from ..domain.oid import ObjectIdentifier
 from ..domain.store import MetricStore
 from ..domain.types import SnmpDataType
 
-
 LOGGER = logging.getLogger(__name__)
 
 
@@ -41,7 +40,9 @@ class StoreInstrumentation(AbstractMibInstrumController):
     def __init__(self, store: MetricStore) -> None:
         self.store = store
 
-    def read_variables(self, *var_binds: tuple[Any, Any], **context_data: Any) -> list[tuple[Any, Any]]:
+    def read_variables(
+        self, *var_binds: tuple[Any, Any], **context_data: Any
+    ) -> list[tuple[Any, Any]]:
         result: list[tuple[Any, Any]] = []
         for name, _ in var_binds:
             oid = ObjectIdentifier(tuple(int(part) for part in name))
