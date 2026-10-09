@@ -453,6 +453,39 @@ async def test_stop_releases_udp_port_before_returning() -> None:
 
 
 @pytest.mark.asyncio
+async def test_stop_waits_for_start_in_progress(monkeypatch: pytest.MonkeyPatch) -> None:
+    port = reserve_udp_port()
+    oid = ObjectIdentifier.parse("1.3.6.1.4.1.55555.1.0")
+    store = MetricStore([Metric("cpu", oid, SnmpDataType.GAUGE32, 25)])
+    start_paused = asyncio.Event()
+    resume_start = asyncio.Event()
+    original_wait_ready = ManagedUdpTransport.wait_ready
+
+    async def pause_after_transport_is_ready(transport: ManagedUdpTransport) -> None:
+        await original_wait_ready(transport)
+        start_paused.set()
+        await resume_start.wait()
+
+    monkeypatch.setattr(ManagedUdpTransport, "wait_ready", pause_after_transport_is_ready)
+    agent = SnmpAgent("127.0.0.1", port, "public", store)
+    start_task = asyncio.create_task(agent.start())
+    await start_paused.wait()
+    stop_task = asyncio.create_task(agent.stop())
+    await asyncio.sleep(0)
+
+    assert not stop_task.done()
+
+    resume_start.set()
+    await start_task
+    await stop_task
+
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as replacement:
+        if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            replacement.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        replacement.bind(("127.0.0.1", port))
+
+
+@pytest.mark.asyncio
 async def test_discards_malformed_datagram_without_loop_error() -> None:
     port = reserve_udp_port()
     oid = ObjectIdentifier.parse("1.3.6.1.4.1.55555.1.0")

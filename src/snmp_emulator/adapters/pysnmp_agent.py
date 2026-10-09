@@ -225,58 +225,61 @@ class SnmpAgent:
         self.port = port
         self.community = community
         self.store = store
+        self._lifecycle_lock = asyncio.Lock()
         self._engine: engine.SnmpEngine | None = None
         self._transport: ManagedUdpTransport | None = None
 
     async def start(self) -> None:
-        if self._engine is not None:
-            raise RuntimeError("SNMP agent is already running")
-        server_socket = bind_udp_socket(self.host, self.port)
-        snmp_engine = engine.SnmpEngine()
-        try:
-            snmp_engine.message_processing_subsystems.pop(0, None)
-            snmp_engine.security_models.pop(1, None)
-            snmp_engine.message_processing_subsystems[1] = V2cMessageProcessingModel()
-            transport = ManagedUdpTransport()
-            transport.open_server_mode(sock=server_socket)
-            config.add_transport(
-                snmp_engine,
-                udp.DOMAIN_NAME,
-                transport,
-            )
-            config.add_v1_system(
-                snmp_engine,
-                "emulator",
-                encode_octet_string(self.community),
-            )
-            for oid_root in ((0,), (1,), (2,)):
-                config.add_vacm_user(
+        async with self._lifecycle_lock:
+            if self._engine is not None:
+                raise RuntimeError("SNMP agent is already running")
+            server_socket = bind_udp_socket(self.host, self.port)
+            snmp_engine = engine.SnmpEngine()
+            try:
+                snmp_engine.message_processing_subsystems.pop(0, None)
+                snmp_engine.security_models.pop(1, None)
+                snmp_engine.message_processing_subsystems[1] = V2cMessageProcessingModel()
+                transport = ManagedUdpTransport()
+                transport.open_server_mode(sock=server_socket)
+                config.add_transport(
                     snmp_engine,
-                    2,
-                    "emulator",
-                    "noAuthNoPriv",
-                    readSubTree=oid_root,
+                    udp.DOMAIN_NAME,
+                    transport,
                 )
-            snmp_context = context.SnmpContext(snmp_engine)
-            snmp_context.unregister_context_name(b"")
-            snmp_context.register_context_name(b"", StoreInstrumentation(self.store))
-            V2cGetCommandResponder(snmp_engine, snmp_context)
-            V2cNextCommandResponder(snmp_engine, snmp_context)
-            V2cBulkCommandResponder(snmp_engine, snmp_context)
-            await transport.wait_ready()
-        except BaseException:
-            snmp_engine.close_dispatcher()
-            server_socket.close()
-            raise
-        self._engine = snmp_engine
-        self._transport = transport
-        LOGGER.info("listening on udp://%s:%d", self.host, self.port)
+                config.add_v1_system(
+                    snmp_engine,
+                    "emulator",
+                    encode_octet_string(self.community),
+                )
+                for oid_root in ((0,), (1,), (2,)):
+                    config.add_vacm_user(
+                        snmp_engine,
+                        2,
+                        "emulator",
+                        "noAuthNoPriv",
+                        readSubTree=oid_root,
+                    )
+                snmp_context = context.SnmpContext(snmp_engine)
+                snmp_context.unregister_context_name(b"")
+                snmp_context.register_context_name(b"", StoreInstrumentation(self.store))
+                V2cGetCommandResponder(snmp_engine, snmp_context)
+                V2cNextCommandResponder(snmp_engine, snmp_context)
+                V2cBulkCommandResponder(snmp_engine, snmp_context)
+                await transport.wait_ready()
+            except BaseException:
+                snmp_engine.close_dispatcher()
+                server_socket.close()
+                raise
+            self._engine = snmp_engine
+            self._transport = transport
+            LOGGER.info("listening on udp://%s:%d", self.host, self.port)
 
     async def stop(self) -> None:
-        if self._engine is not None:
-            transport = self._transport
-            self._engine.close_dispatcher()
-            self._engine = None
-            self._transport = None
-            if transport is not None:
-                await transport.wait_closed()
+        async with self._lifecycle_lock:
+            if self._engine is not None:
+                transport = self._transport
+                self._engine.close_dispatcher()
+                self._engine = None
+                self._transport = None
+                if transport is not None:
+                    await transport.wait_closed()
