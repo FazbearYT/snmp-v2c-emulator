@@ -20,6 +20,24 @@ from ..domain.types import SnmpDataType
 LOGGER = logging.getLogger(__name__)
 
 
+class ManagedUdpTransport(udp.UdpAsyncioTransport):
+    def __init__(self) -> None:
+        super().__init__()
+        self._closed = asyncio.Event()
+
+    async def wait_ready(self) -> None:
+        if self._lport is None:
+            raise RuntimeError("UDP transport has not been opened")
+        await self._lport
+
+    async def wait_closed(self) -> None:
+        await self._closed.wait()
+
+    def connection_lost(self, exc: Exception | None) -> None:
+        super().connection_lost(exc)
+        self._closed.set()
+
+
 def bind_udp_socket(host: str, port: int) -> socket.socket:
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
@@ -86,6 +104,7 @@ class SnmpAgent:
         self.community = community
         self.store = store
         self._engine: engine.SnmpEngine | None = None
+        self._transport: ManagedUdpTransport | None = None
 
     async def start(self) -> None:
         if self._engine is not None:
@@ -93,7 +112,8 @@ class SnmpAgent:
         server_socket = bind_udp_socket(self.host, self.port)
         snmp_engine = engine.SnmpEngine()
         try:
-            transport = udp.UdpAsyncioTransport().open_server_mode(sock=server_socket)
+            transport = ManagedUdpTransport()
+            transport.open_server_mode(sock=server_socket)
             config.add_transport(
                 snmp_engine,
                 udp.DOMAIN_NAME,
@@ -114,15 +134,20 @@ class SnmpAgent:
             cmdrsp.GetCommandResponder(snmp_engine, snmp_context)
             cmdrsp.NextCommandResponder(snmp_engine, snmp_context)
             cmdrsp.BulkCommandResponder(snmp_engine, snmp_context)
+            await transport.wait_ready()
         except Exception:
             snmp_engine.close_dispatcher()
             server_socket.close()
             raise
         self._engine = snmp_engine
-        await asyncio.sleep(0)
+        self._transport = transport
         LOGGER.info("listening on udp://%s:%d", self.host, self.port)
 
     async def stop(self) -> None:
         if self._engine is not None:
+            transport = self._transport
             self._engine.close_dispatcher()
             self._engine = None
+            self._transport = None
+            if transport is not None:
+                await transport.wait_closed()

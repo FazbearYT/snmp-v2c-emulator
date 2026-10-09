@@ -272,3 +272,17 @@ async def test_rejects_starting_same_agent_twice() -> None:
             await agent.start()
     finally:
         await agent.stop()
+
+
+@pytest.mark.asyncio
+async def test_stop_releases_udp_port_before_returning() -> None:
+    port = reserve_udp_port()
+    oid = ObjectIdentifier.parse("1.3.6.1.4.1.55555.1.0")
+    store = MetricStore([Metric("cpu", oid, SnmpDataType.GAUGE32, 25)])
+    first = SnmpAgent("127.0.0.1", port, "public", store)
+    second = SnmpAgent("127.0.0.1", port, "public", store)
+
+    await first.start()
+    await first.stop()
+    await second.start()
+    await second.stop()
