@@ -37,6 +37,22 @@ class ManagedUdpTransport(udp.UdpAsyncioTransport):
         super().connection_lost(exc)
         self._closed.set()
 
+    def datagram_received(self, datagram: bytes, transport_address: Any) -> None:
+        if self._callback_function is None:
+            super().datagram_received(datagram, transport_address)
+            return
+        self.loop.call_soon(self._process_datagram, transport_address, datagram)
+
+    def _process_datagram(self, transport_address: Any, datagram: bytes) -> None:
+        try:
+            self._callback_function(self, transport_address, datagram)
+        except Exception:
+            LOGGER.debug(
+                "discarded malformed SNMP datagram from %s",
+                transport_address,
+                exc_info=True,
+            )
+
 
 def bind_udp_socket(host: str, port: int) -> socket.socket:
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -135,7 +151,7 @@ class SnmpAgent:
             cmdrsp.NextCommandResponder(snmp_engine, snmp_context)
             cmdrsp.BulkCommandResponder(snmp_engine, snmp_context)
             await transport.wait_ready()
-        except Exception:
+        except BaseException:
             snmp_engine.close_dispatcher()
             server_socket.close()
             raise

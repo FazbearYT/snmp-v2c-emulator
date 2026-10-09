@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -56,4 +57,32 @@ async def test_stops_agent_when_scenario_engine_fails() -> None:
     assert isinstance(error.value.exceptions[0], RuntimeError)
     assert str(error.value.exceptions[0]) == "scenario failed"
     assert agent.started
+    assert agent.stopped
+
+
+@pytest.mark.asyncio
+async def test_cancellation_during_start_still_stops_agent() -> None:
+    config = load_config(EXAMPLE_CONFIG)
+    application = EmulatorApplication(config)
+
+    class HangingAgent:
+        def __init__(self) -> None:
+            self.start_entered = asyncio.Event()
+            self.stopped = False
+
+        async def start(self) -> None:
+            self.start_entered.set()
+            await asyncio.Event().wait()
+
+        async def stop(self) -> None:
+            self.stopped = True
+
+    agent = HangingAgent()
+    application.agent = agent
+    task = asyncio.create_task(application.run())
+    await agent.start_entered.wait()
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
     assert agent.stopped

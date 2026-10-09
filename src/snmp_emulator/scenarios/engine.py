@@ -77,9 +77,23 @@ class ScenarioEngine:
         self.clock = clock or MonotonicClock()
         self.tick_interval = tick_interval
         self._started_at: float | None = None
+        self._scenario_baselines: dict[str, dict[str, object]] = {}
+        self._scenario_cycles: dict[str, int] = {}
 
     def start(self) -> None:
         self._started_at = self.clock.now()
+        self._scenario_baselines = {}
+        self._scenario_cycles = {}
+        for scenario in self.scenarios:
+            if scenario.repeat_every is None:
+                continue
+            baseline: dict[str, object] = {}
+            for action in scenario.actions:
+                metric = self.store.get_by_name(action.metric)
+                if metric is not None:
+                    baseline[action.metric] = metric.value
+            self._scenario_baselines[scenario.name] = baseline
+            self._scenario_cycles[scenario.name] = 0
 
     def tick(self) -> None:
         if self._started_at is None:
@@ -88,6 +102,11 @@ class ScenarioEngine:
         for scenario in self.scenarios:
             local_elapsed = elapsed
             if scenario.repeat_every is not None:
+                cycle = int(elapsed // scenario.repeat_every)
+                if cycle != self._scenario_cycles[scenario.name]:
+                    for metric_name, value in self._scenario_baselines[scenario.name].items():
+                        self.store.update(metric_name, value)
+                    self._scenario_cycles[scenario.name] = cycle
                 local_elapsed %= scenario.repeat_every
             for action in scenario.actions:
                 active, value = action.value_at(local_elapsed)

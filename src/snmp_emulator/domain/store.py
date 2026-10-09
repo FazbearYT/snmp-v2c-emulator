@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from bisect import bisect_right
 from collections.abc import Iterable
+from dataclasses import replace
 
 from .metric import Metric
 from .oid import ObjectIdentifier
@@ -37,7 +38,7 @@ class MetricStore:
         metric.update(value)
 
     def snapshot(self) -> tuple[Metric, ...]:
-        return tuple(self._by_oid[oid] for oid in self._ordered_oids)
+        return tuple(replace(self._by_oid[oid]) for oid in self._ordered_oids)
 
     def __len__(self) -> int:
         return len(self._ordered_oids)

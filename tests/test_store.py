@@ -31,3 +31,14 @@ def test_update_preserves_metric_type() -> None:
     assert store.get_by_name("cpu").value == 90
     with pytest.raises(ValueError):
         store.update("cpu", -1)
+
+
+def test_snapshot_is_isolated_from_later_updates() -> None:
+    store = MetricStore([metric("cpu", "1.3.6.1.4.1.55555.1.0", 10)])
+
+    snapshot = store.snapshot()
+    store.update("cpu", 90)
+    snapshot[0].value = 25
+
+    assert snapshot[0].value == 25
+    assert store.get_by_name("cpu").value == 90

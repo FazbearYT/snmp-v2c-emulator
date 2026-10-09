@@ -16,7 +16,11 @@ from pysnmp.hlapi.v3arch.asyncio import (
 from pysnmp.proto import rfc1902
 from pysnmp.smi import exval
 
-from snmp_emulator.adapters.pysnmp_agent import SnmpAgent, StoreInstrumentation
+from snmp_emulator.adapters.pysnmp_agent import (
+    ManagedUdpTransport,
+    SnmpAgent,
+    StoreInstrumentation,
+)
 from snmp_emulator.domain.metric import Metric
 from snmp_emulator.domain.oid import ObjectIdentifier
 from snmp_emulator.domain.store import MetricStore
@@ -286,3 +290,67 @@ async def test_stop_releases_udp_port_before_returning() -> None:
     await first.stop()
     await second.start()
     await second.stop()
+
+
+@pytest.mark.asyncio
+async def test_discards_malformed_datagram_without_loop_error() -> None:
+    port = reserve_udp_port()
+    oid = ObjectIdentifier.parse("1.3.6.1.4.1.55555.1.0")
+    store = MetricStore([Metric("cpu", oid, SnmpDataType.GAUGE32, 25)])
+    agent = SnmpAgent("127.0.0.1", port, "public", store)
+    loop = asyncio.get_running_loop()
+    previous_handler = loop.get_exception_handler()
+    loop_errors: list[dict[str, object]] = []
+    loop.set_exception_handler(lambda _loop, context: loop_errors.append(context))
+    await agent.start()
+    client_engine = engine.SnmpEngine()
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sender:
+            sender.sendto(b"\x30\x82\xff\xff", ("127.0.0.1", port))
+        await asyncio.sleep(0.05)
+
+        target = await UdpTransportTarget.create(("127.0.0.1", port), timeout=1, retries=0)
+        error, status, _, var_binds = await get_cmd(
+            client_engine,
+            CommunityData("public", mpModel=1),
+            target,
+            ContextData(),
+            ObjectType(ObjectIdentity(str(oid))),
+        )
+
+        assert not loop_errors
+        assert error is None
+        assert not status
+        assert int(var_binds[0][1]) == 25
+    finally:
+        loop.set_exception_handler(previous_handler)
+        client_engine.close_dispatcher()
+        await agent.stop()
+
+
+@pytest.mark.asyncio
+async def test_cancellation_during_start_releases_udp_port(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    port = reserve_udp_port()
+    oid = ObjectIdentifier.parse("1.3.6.1.4.1.55555.1.0")
+    store = MetricStore([Metric("cpu", oid, SnmpDataType.GAUGE32, 25)])
+    wait_entered = asyncio.Event()
+
+    async def wait_forever(_transport: ManagedUdpTransport) -> None:
+        wait_entered.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(ManagedUdpTransport, "wait_ready", wait_forever)
+    agent = SnmpAgent("127.0.0.1", port, "public", store)
+    start_task = asyncio.create_task(agent.start())
+    await wait_entered.wait()
+    start_task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await start_task
+
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as replacement:
+        if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            replacement.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        replacement.bind(("127.0.0.1", port))

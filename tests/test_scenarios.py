@@ -68,6 +68,33 @@ def test_sequence_advances_and_repeats() -> None:
     assert store.get_by_name("cpu").value == 20
 
 
+def test_repeating_scenario_restores_baseline_at_cycle_boundary() -> None:
+    clock = ManualClock()
+    store = build_store()
+    scenario = Scenario(
+        "cycle",
+        (
+            SetAction("cpu", 2, 20),
+            SetAction("cpu", 8, 90),
+        ),
+        repeat_every=10,
+    )
+    engine = ScenarioEngine(store, (scenario,), clock)
+    engine.start()
+
+    clock.value = 8
+    engine.tick()
+    assert store.get_by_name("cpu").value == 90
+
+    clock.value = 10
+    engine.tick()
+    assert store.get_by_name("cpu").value == 10
+
+    clock.value = 12
+    engine.tick()
+    assert store.get_by_name("cpu").value == 20
+
+
 def test_ramp_interpolates_value() -> None:
     action = RampAction("cpu", at=2, duration=8, start=10, end=90)
 

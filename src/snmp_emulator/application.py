@@ -35,8 +35,8 @@ class EmulatorApplication:
         self.scenario_engine = ScenarioEngine(self.store, build_scenarios(config.scenarios))
 
     async def run(self) -> None:
-        await self.agent.start()
         try:
+            await self.agent.start()
             async with asyncio.TaskGroup() as tasks:
                 tasks.create_task(self.scenario_engine.run())
                 tasks.create_task(asyncio.Event().wait())
