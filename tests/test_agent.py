@@ -114,3 +114,29 @@ async def test_answers_get_over_udp() -> None:
     finally:
         client_engine.close_dispatcher()
         await agent.stop()
+
+
+@pytest.mark.asyncio
+async def test_answers_for_oid_outside_mib_2_subtree() -> None:
+    port = reserve_udp_port()
+    oid = ObjectIdentifier.parse("2.999.1.0")
+    store = MetricStore([Metric("alternate_root", oid, SnmpDataType.INTEGER, 7)])
+    agent = SnmpAgent("127.0.0.1", port, "public", store)
+    await agent.start()
+    await asyncio.sleep(0.05)
+    client_engine = engine.SnmpEngine()
+    try:
+        target = await UdpTransportTarget.create(("127.0.0.1", port), timeout=1, retries=0)
+        error, status, _, var_binds = await get_cmd(
+            client_engine,
+            CommunityData("public", mpModel=1),
+            target,
+            ContextData(),
+            ObjectType(ObjectIdentity(str(oid))),
+        )
+        assert error is None
+        assert not status
+        assert int(var_binds[0][1]) == 7
+    finally:
+        client_engine.close_dispatcher()
+        await agent.stop()

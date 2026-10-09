@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
@@ -77,8 +78,8 @@ class RampActionConfig(BaseModel):
     metric: str
     at: float = Field(default=0, ge=0)
     duration: float = Field(gt=0)
-    start: float
-    end: float
+    start: int
+    end: int
 
 
 class StepActionConfig(BaseModel):
@@ -92,6 +93,16 @@ class StepActionConfig(BaseModel):
     amount: int
     minimum: int | None = None
     maximum: int | None = None
+
+    @model_validator(mode="after")
+    def validate_limits(self) -> StepActionConfig:
+        if (
+            self.minimum is not None
+            and self.maximum is not None
+            and self.minimum > self.maximum
+        ):
+            raise ValueError("step minimum cannot exceed maximum")
+        return self
 
 
 ActionConfig = Annotated[
@@ -135,6 +146,14 @@ class EmulatorConfig(BaseModel):
             raise ValueError("scenario names must be unique")
         for scenario in self.scenarios:
             for action in scenario.actions:
+                if (
+                    scenario.repeat_every is not None
+                    and action.at >= scenario.repeat_every
+                ):
+                    raise ValueError(
+                        f"scenario action at={action.at} must be less than "
+                        f"repeat_every={scenario.repeat_every}"
+                    )
                 metric = metrics.get(action.metric)
                 if metric is None:
                     raise ValueError(f"unknown scenario metric: {action.metric}")
@@ -143,13 +162,49 @@ class EmulatorConfig(BaseModel):
                 elif isinstance(action, SequenceActionConfig):
                     for value in action.values:
                         validate_snmp_value(metric.type, value)
-                elif metric.type in {
-                    SnmpDataType.OCTET_STRING,
-                    SnmpDataType.OBJECT_IDENTIFIER,
-                    SnmpDataType.IP_ADDRESS,
-                }:
-                    raise ValueError(f"{action.type} requires a numeric metric")
+                else:
+                    if metric.type in {
+                        SnmpDataType.OCTET_STRING,
+                        SnmpDataType.OBJECT_IDENTIFIER,
+                        SnmpDataType.IP_ADDRESS,
+                    }:
+                        raise ValueError(f"{action.type} requires a numeric metric")
+                    if isinstance(action, RampActionConfig):
+                        validate_snmp_value(metric.type, action.start)
+                        validate_snmp_value(metric.type, action.end)
+                    elif isinstance(action, StepActionConfig):
+                        self._validate_step_action(scenario, action, metric.type)
         return self
+
+    @staticmethod
+    def _validate_step_action(
+        scenario: ScenarioConfig,
+        action: StepActionConfig,
+        data_type: SnmpDataType,
+    ) -> None:
+        for value in (action.start, action.minimum, action.maximum):
+            if value is not None:
+                validate_snmp_value(data_type, value)
+
+        if scenario.repeat_every is None:
+            if action.amount > 0 and action.maximum is None:
+                raise ValueError(
+                    "a non-repeating positive step requires maximum to prevent overflow"
+                )
+            if action.amount < 0 and action.minimum is None:
+                raise ValueError(
+                    "a non-repeating negative step requires minimum to prevent overflow"
+                )
+            return
+
+        active_duration = scenario.repeat_every - action.at
+        last_step = max(0, math.ceil(active_duration / action.interval) - 1)
+        final_value = action.start + last_step * action.amount
+        if action.minimum is not None:
+            final_value = max(final_value, action.minimum)
+        if action.maximum is not None:
+            final_value = min(final_value, action.maximum)
+        validate_snmp_value(data_type, final_value)
 
 
 class ConfigurationError(ValueError):

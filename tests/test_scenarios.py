@@ -65,7 +65,7 @@ def test_sequence_advances_and_repeats() -> None:
 
 
 def test_ramp_interpolates_value() -> None:
-    action = RampAction("cpu", at=2, duration=8, start=10.0, end=90.0)
+    action = RampAction("cpu", at=2, duration=8, start=10, end=90)
 
     assert action.value_at(1) == (False, None)
     assert action.value_at(6) == (True, 50)

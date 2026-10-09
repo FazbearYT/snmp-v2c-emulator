@@ -36,16 +36,14 @@ class RampAction:
     metric: str
     at: float
     duration: float
-    start: float
-    end: float
+    start: int
+    end: int
 
     def value_at(self, elapsed: float) -> tuple[bool, Any]:
         if elapsed < self.at:
             return (False, None)
         progress = min((elapsed - self.at) / self.duration, 1.0)
-        value = self.start + (self.end - self.start) * progress
-        if self.start.is_integer() and self.end.is_integer():
-            value = round(value)
+        value = round(self.start + (self.end - self.start) * progress)
         return (True, value)
 
 

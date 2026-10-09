@@ -81,14 +81,14 @@ class SnmpAgent:
             udp.UdpAsyncioTransport().open_server_mode((self.host, self.port)),
         )
         config.add_v1_system(snmp_engine, "emulator", self.community)
-        config.add_vacm_user(
-            snmp_engine,
-            2,
-            "emulator",
-            "noAuthNoPriv",
-            (1, 3, 6),
-            (1, 3, 6),
-        )
+        for oid_root in ((0,), (1,), (2,)):
+            config.add_vacm_user(
+                snmp_engine,
+                2,
+                "emulator",
+                "noAuthNoPriv",
+                readSubTree=oid_root,
+            )
         snmp_context = context.SnmpContext(snmp_engine)
         snmp_context.unregister_context_name(b"")
         snmp_context.register_context_name(b"", StoreInstrumentation(self.store))
