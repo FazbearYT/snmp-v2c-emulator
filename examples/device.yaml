@@ -1,0 +1,28 @@
+schema_version: 1
+agent:
+  host: 0.0.0.0
+  port: 1161
+  community: public
+metrics:
+  - name: system_description
+    oid: 1.3.6.1.2.1.1.1.0
+    type: OctetString
+    initial: SNMP v2c emulator
+  - name: cpu_usage
+    oid: 1.3.6.1.4.1.55555.1.1.0
+    type: Gauge32
+    initial: 15
+scenarios:
+  - name: cpu_demo
+    repeat_every: 12
+    actions:
+      - type: ramp
+        metric: cpu_usage
+        at: 2
+        duration: 6
+        start: 15
+        end: 90
+      - type: set
+        metric: cpu_usage
+        at: 10
+        value: 15
