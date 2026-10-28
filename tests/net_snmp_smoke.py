@@ -69,7 +69,13 @@ def main() -> None:
                 if f"INTEGER: {final_value}" not in result:
                     raise RuntimeError(f"unexpected {scenario} value: {result}")
                 walked = query("snmpwalk", "1.3.6.1.4.1.55555")
-                if len(walked.strip().splitlines()) != 5:
+                walked_oids = [
+                    line.split(" = ", 1)[0]
+                    for line in walked.splitlines()
+                    if " = INTEGER: " in line or " = STRING: " in line
+                ]
+                expected_oids = [f".{metric['oid']}" for metric in device["metrics"]]
+                if walked_oids != expected_oids:
                     raise RuntimeError(f"unexpected walk: {walked}")
                 missing = query("snmpget", "1.3.6.1.4.1.55555.99.0")
                 if "No Such Object" not in missing:
