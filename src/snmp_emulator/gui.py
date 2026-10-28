@@ -6,6 +6,7 @@ from collections import deque
 from pathlib import Path
 from tkinter import filedialog, ttk
 
+from .gui_console import SnmpConsoleWindow
 from .gui_controller import PanelController, PanelSnapshot, examples_directory
 
 PROFILES = {
@@ -34,7 +35,9 @@ class EmulatorPanel:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.controller = PanelController()
+        self.console: SnmpConsoleWindow | None = None
         self._closing = False
+        self._stopping = False
         self._history: deque[tuple[float, dict[str, int]]] = deque(maxlen=600)
         self._numeric_names: list[str] = []
         self._examples = examples_directory()
@@ -116,13 +119,14 @@ class EmulatorPanel:
         actions = ttk.Frame(frame)
         actions.grid(row=5, column=0, columnspan=3, sticky="ew", pady=16)
         self.start_button = ttk.Button(actions, text="Запустить", command=self.start)
-        self.start_button.pack(side="left")
+        self.start_button.grid(row=0, column=0)
         self.stop_button = ttk.Button(
             actions, text="Остановить", command=self.stop, state="disabled"
         )
-        self.stop_button.pack(side="left", padx=8)
-        ttk.Label(actions, textvariable=self.status, style="Status.TLabel").pack(
-            side="left", padx=12
+        self.stop_button.grid(row=0, column=1, padx=8)
+        ttk.Button(actions, text="SNMP-запросы…", command=self.open_console).grid(row=0, column=2)
+        ttk.Label(actions, textvariable=self.status, style="Status.TLabel", wraplength=740).grid(
+            row=1, column=0, columnspan=3, sticky="w", pady=(8, 0)
         )
         ttk.Label(frame, textvariable=self.details).grid(row=6, column=0, columnspan=3, sticky="w")
         ttk.Label(frame, textvariable=self.error, style="Error.TLabel", wraplength=940).grid(
@@ -182,6 +186,7 @@ class EmulatorPanel:
 
     def start(self) -> None:
         if self.controller.start(*self.selected_paths()):
+            self._stopping = False
             self._history.clear()
             self._numeric_names.clear()
             self.table.delete(*self.table.get_children())
@@ -190,7 +195,7 @@ class EmulatorPanel:
 
     def _set_active(self, active: bool) -> None:
         self.start_button.configure(state="disabled" if active else "normal")
-        self.stop_button.configure(state="normal" if active else "disabled")
+        self.stop_button.configure(state="normal" if active and not self._stopping else "disabled")
         for widget in self._inputs:
             state = "disabled" if active else "normal"
             if not active and isinstance(widget, (ttk.Entry, ttk.Combobox)):
@@ -198,6 +203,10 @@ class EmulatorPanel:
             widget.configure(state=state)
 
     def stop(self) -> None:
+        self._stopping = True
+        if self.console is not None:
+            self.console.client.cancel()
+            self.console.refresh(self.controller.snapshot(), False)
         self.controller.stop()
         if self.controller.active:
             self.status.set("Остановка…")
@@ -206,23 +215,50 @@ class EmulatorPanel:
     def close(self) -> None:
         self._closing = True
         self.controller.stop()
+        if self.console is not None:
+            self.console.client.cancel()
         self.status.set("Завершение работы…")
         self._set_active(True)
         self.stop_button.configure(state="disabled")
 
     def _refresh(self) -> None:
         if self._closing:
-            if not self.controller.active:
+            if not self.controller.active and (
+                self.console is None or not self.console.client.active
+            ):
                 self.root.destroy()
                 return
         else:
             snapshot = self.controller.snapshot()
-            self.status.set(STATES[snapshot.state])
+            if self.console is not None:
+                self.console.refresh(
+                    snapshot,
+                    self.controller.active
+                    and not self._stopping
+                    and snapshot.state in ("running", "completed"),
+                )
+            self.status.set(
+                "Остановка…"
+                if self._stopping and self.controller.active
+                else STATES[snapshot.state]
+            )
             self.error.set(snapshot.error)
             self._set_active(self.controller.active)
             if snapshot.metrics:
                 self._show_metrics(snapshot)
         self.root.after(100, self._refresh)
+
+    def open_console(self) -> None:
+        if self.console is None:
+            self.console = SnmpConsoleWindow(self.root)
+        snapshot = self.controller.snapshot()
+        self.console.refresh(
+            snapshot,
+            self.controller.active
+            and not self._stopping
+            and snapshot.state in ("running", "completed"),
+        )
+        self.console.show()
 
     def _show_metrics(self, snapshot: PanelSnapshot) -> None:
         duration = f" / {snapshot.duration:g} с" if snapshot.duration is not None else " с"

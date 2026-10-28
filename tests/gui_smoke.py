@@ -21,6 +21,7 @@ from pysnmp.hlapi.v3arch.asyncio import (
 )
 
 from snmp_emulator.gui import EmulatorPanel
+from snmp_emulator.gui_console import SnmpConsoleWindow
 from snmp_emulator.gui_controller import examples_directory
 
 
@@ -59,6 +60,7 @@ async def verify_snmp(snapshot, port):
 
 def main():
     root = tk.Tk()
+    root.withdraw()
     window_closed = False
 
     def on_destroy(event):
@@ -95,6 +97,16 @@ def main():
                 raise RuntimeError("GUI scenario did not reach limit")
             asyncio.run(verify_snmp(snapshot, port))
             pump(root, lambda: len(panel.table.get_children()) == 5)
+            panel.console = SnmpConsoleWindow(root)
+            panel.console.refresh(snapshot, True)
+            for operation in ("GET", "GETNEXT", "WALK", "GETBULK"):
+                panel.console.template(operation)
+                panel.console.execute()
+                pump(root, lambda: not panel.console.client.active)
+                panel.console.refresh(panel.controller.snapshot(), True)
+            output = panel.console.output.get("1.0", "end")
+            if output.count("Завершено за") != 4 or "Ошибка" in output:
+                raise RuntimeError(f"Console smoke failed: {output}")
             panel.stop()
             pump(root, lambda: not panel.controller.active)
             panel.start()
@@ -105,7 +117,15 @@ def main():
                 probe.bind(("127.0.0.1", port))
     finally:
         panel.controller.stop()
-        pump(root, lambda: not panel.controller.active)
+        if panel.console is not None:
+            panel.console.client.cancel()
+        pump(
+            root,
+            lambda: (
+                not panel.controller.active
+                and (panel.console is None or not panel.console.client.active)
+            ),
+        )
         if not window_closed:
             root.destroy()
     print("GUI, lifecycle and external SNMP GET/WALK passed")
