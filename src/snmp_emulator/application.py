@@ -25,6 +25,7 @@ def build_store(config: EmulatorConfig) -> MetricStore:
 class EmulatorApplication:
     def __init__(self, config: EmulatorConfig) -> None:
         self.config = config
+        self.started = asyncio.Event()
         self.store = build_store(config)
         self.agent = SnmpAgent(
             config.agent.host,
@@ -42,8 +43,10 @@ class EmulatorApplication:
     async def run(self) -> None:
         try:
             await self.agent.start()
+            self.started.set()
             async with asyncio.TaskGroup() as tasks:
                 tasks.create_task(self.scenario_engine.run())
                 tasks.create_task(asyncio.Event().wait())
         finally:
+            self.started.clear()
             await self.agent.stop()

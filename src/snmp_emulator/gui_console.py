@@ -1,0 +1,207 @@
+from __future__ import annotations
+
+import queue
+import tkinter as tk
+from collections import deque
+from tkinter import ttk
+
+from .gui_controller import PanelSnapshot
+from .snmp_console import COMMANDS, ConsoleClient, parse_request, subtree_root, suggestions
+
+
+class SnmpConsoleWindow:
+    def __init__(self, parent: tk.Misc) -> None:
+        self.window = tk.Toplevel(parent)
+        self.window.withdraw()
+        self.window.title("SNMP · Консоль запросов")
+        self.window.geometry("1000x700")
+        self.window.minsize(760, 560)
+        self.window.protocol("WM_DELETE_WINDOW", self.hide)
+        self.client = ConsoleClient()
+        self.snapshot = PanelSnapshot()
+        self.ready = False
+        self._suggestions: list[tuple[str, str]] = []
+        self._history: deque[str] = deque(maxlen=100)
+        self._history_index = 0
+        self.command = tk.StringVar(master=self.window)
+        self.hint = tk.StringVar(master=self.window, value="Выберите шаблон команды ниже")
+        self.target = tk.StringVar(
+            master=self.window, value="Сначала запустите эмулятор в главном окне"
+        )
+        self._build()
+        self.command.trace_add("write", self._update_suggestions)
+        self._append(
+            "Консоль выполняет реальные SNMP v2c-запросы по UDP.\n"
+            "Шаблон подставляет команду; Enter или «Выполнить» отправляет запрос.\n"
+            "Tab — первая подсказка, ↑/↓ — история. HELP — справка, CLEAR — очистка.\n"
+        )
+
+    def _build(self) -> None:
+        frame = ttk.Frame(self.window, padding=18)
+        frame.pack(fill="both", expand=True)
+        ttk.Label(frame, text="SNMP-запросы к работающему эмулятору", style="Status.TLabel").pack(
+            anchor="w"
+        )
+        ttk.Label(frame, textvariable=self.target).pack(anchor="w", pady=(6, 12))
+        templates = ttk.Frame(frame)
+        templates.pack(fill="x")
+        for operation in COMMANDS:
+            ttk.Button(
+                templates, text=operation, command=lambda op=operation: self.template(op)
+            ).pack(side="left", padx=(0, 8))
+        ttk.Button(templates, text="Справка", command=self.help).pack(side="right")
+        ttk.Label(frame, textvariable=self.hint, wraplength=900).pack(anchor="w", pady=(10, 6))
+        command_row = ttk.Frame(frame)
+        command_row.pack(fill="x")
+        self.entry = ttk.Entry(command_row, textvariable=self.command, font=("Consolas", 11))
+        self.entry.pack(side="left", fill="x", expand=True)
+        self.entry.bind("<Return>", lambda _: self.execute())
+        self.entry.bind("<Tab>", self._complete_first)
+        self.entry.bind("<Up>", lambda _: self._recall(-1))
+        self.entry.bind("<Down>", lambda _: self._recall(1))
+        self.run_button = ttk.Button(
+            command_row, text="Выполнить", command=self.execute, state="disabled"
+        )
+        self.run_button.pack(side="left", padx=8)
+        self.cancel_button = ttk.Button(
+            command_row, text="Отменить", command=self.client.cancel, state="disabled"
+        )
+        self.cancel_button.pack(side="left")
+        self.choices = tk.Listbox(frame, height=4, exportselection=False, font=("Consolas", 10))
+        self.choices.pack(fill="x", pady=(6, 10))
+        self.choices.bind("<<ListboxSelect>>", self._complete_selected)
+        output_frame = ttk.Frame(frame)
+        output_frame.pack(fill="both", expand=True)
+        self.output = tk.Text(
+            output_frame,
+            state="disabled",
+            wrap="none",
+            background="#152232",
+            foreground="#e3edf8",
+            font=("Consolas", 11),
+            padx=12,
+            pady=12,
+        )
+        vertical = ttk.Scrollbar(output_frame, command=self.output.yview)
+        horizontal = ttk.Scrollbar(output_frame, orient="horizontal", command=self.output.xview)
+        self.output.configure(yscrollcommand=vertical.set, xscrollcommand=horizontal.set)
+        output_frame.columnconfigure(0, weight=1)
+        output_frame.rowconfigure(0, weight=1)
+        self.output.grid(row=0, column=0, sticky="nsew")
+        vertical.grid(row=0, column=1, sticky="ns")
+        horizontal.grid(row=1, column=0, sticky="ew")
+
+    def _append(self, text: str) -> None:
+        self.output.configure(state="normal")
+        self.output.insert("end", text + "\n")
+        if int(self.output.index("end-1c").split(".")[0]) > 1200:
+            self.output.delete("1.0", "end-1000l")
+        self.output.see("end")
+        self.output.configure(state="disabled")
+
+    def show(self) -> None:
+        self.window.deiconify()
+        self.window.lift()
+        self.entry.focus_set()
+
+    def hide(self) -> None:
+        self.client.cancel()
+        self.window.withdraw()
+
+    def refresh(self, snapshot: PanelSnapshot, ready: bool) -> None:
+        changed = [(m.name, m.oid) for m in snapshot.metrics] != [
+            (m.name, m.oid) for m in self.snapshot.metrics
+        ]
+        self.snapshot = snapshot
+        self.ready = ready
+        self.target.set(
+            f"SNMP v2c · UDP {snapshot.address}"
+            if ready
+            else "Эмулятор остановлен. Запустите его в главном окне."
+        )
+        self.run_button.configure(
+            state="normal" if ready and not self.client.active else "disabled"
+        )
+        self.cancel_button.configure(state="normal" if self.client.active else "disabled")
+        if changed:
+            self._update_suggestions()
+        while True:
+            try:
+                self._append(self.client.output.get_nowait())
+            except queue.Empty:
+                break
+
+    def template(self, operation: str) -> None:
+        metrics = self.snapshot.metrics
+        oid = str(metrics[0].oid) if metrics and operation == "GET" else subtree_root(metrics)
+        self.command.set(f"{operation} {oid}" + (" 5" if operation == "GETBULK" else ""))
+        self.entry.focus_set()
+        self.entry.icursor("end")
+
+    def _update_suggestions(self, *_args: object) -> None:
+        text = self.command.get()
+        operation = text.split()[0].upper() if text.split() else ""
+        self.hint.set(
+            COMMANDS.get(operation, "GET / GETNEXT / WALK / GETBULK · введите OID или имя метрики")
+        )
+        self._suggestions = suggestions(text, self.snapshot.metrics)
+        self.choices.delete(0, "end")
+        for label, _ in self._suggestions:
+            self.choices.insert("end", label)
+
+    def _complete_first(self, _event: object = None) -> str:
+        if self._suggestions:
+            self.command.set(self._suggestions[0][1])
+            self.entry.icursor("end")
+        return "break"
+
+    def _complete_selected(self, _event: object = None) -> None:
+        selected = self.choices.curselection()
+        if selected:
+            replacement = self._suggestions[selected[0]][1]
+            self.command.set(replacement)
+            self.entry.focus_set()
+            self.entry.icursor("end")
+
+    def _recall(self, step: int) -> str:
+        self._history_index = min(len(self._history), max(0, self._history_index + step))
+        self.command.set(
+            self._history[self._history_index] if self._history_index < len(self._history) else ""
+        )
+        self.entry.icursor("end")
+        return "break"
+
+    def help(self) -> None:
+        self._append(
+            "\n".join(COMMANDS.values()) + "\nWALK использует GETNEXT до конца ветки.\n"
+            "GETBULK: non-repeaters=0, количество — max-repetitions (по умолчанию 5).\n"
+            "OID можно вводить вручную, включая отсутствующие, или выбрать из подсказок.\n"
+            "Таймаут ответа 1 с, без повторов. WALK: до 256 метрик, максимум 15 с.\n"
+        )
+
+    def execute(self) -> None:
+        text = self.command.get().strip()
+        if text.upper() == "HELP":
+            self.help()
+            return
+        if text.upper() == "CLEAR":
+            self.output.configure(state="normal")
+            self.output.delete("1.0", "end")
+            self.output.configure(state="disabled")
+            return
+        if not self.ready:
+            self._append("Сначала запустите эмулятор в главном окне.")
+            return
+        if self.client.active:
+            self._append("Дождитесь ответа или отмените текущий запрос.")
+            return
+        try:
+            request = parse_request(text, self.snapshot.metrics)
+        except ValueError as exc:
+            self._append(f"Ошибка команды: {exc}")
+            return
+        host, port = self.snapshot.address.rsplit(":", 1)
+        if self.client.start(request, host, int(port), self.snapshot.community):
+            self._history.append(text)
+            self._history_index = len(self._history)
+            self.run_button.configure(state="disabled")

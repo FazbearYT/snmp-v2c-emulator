@@ -31,6 +31,9 @@ quality = [
 [project.scripts]
 snmp-emulator = "snmp_emulator.__main__:main"
 
+[project.gui-scripts]
+snmp-emulator-gui = "snmp_emulator.gui:main"
+
 [tool.setuptools]
 package-dir = {"" = "src"}
 
