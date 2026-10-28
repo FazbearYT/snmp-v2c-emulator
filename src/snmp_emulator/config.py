@@ -161,6 +161,8 @@ class EmulatorConfig(BaseModel):
     agent: AgentConfig = Field(default_factory=AgentConfig)
     metrics: list[MetricConfig] = Field(min_length=1)
     scenarios: list[ScenarioConfig] = Field(default_factory=list)
+    duration: float | None = Field(default=None, gt=0, allow_inf_nan=False, strict=True)
+    update_interval: float = Field(default=0.1, gt=0, allow_inf_nan=False, strict=True)
 
     @field_validator("schema_version", mode="before")
     @classmethod

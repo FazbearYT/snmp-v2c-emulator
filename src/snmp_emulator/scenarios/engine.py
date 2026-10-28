@@ -80,11 +80,13 @@ class ScenarioEngine:
         scenarios: tuple[Scenario, ...],
         clock: Clock | None = None,
         tick_interval: float = 0.1,
+        duration: float | None = None,
     ) -> None:
         self.store = store
         self.scenarios = scenarios
         self.clock = clock or MonotonicClock()
         self.tick_interval = tick_interval
+        self.duration = duration
         self._started_at: Decimal | None = None
         self._scenario_baselines: dict[str, dict[str, object]] = {}
         self._scenario_cycles: dict[str, int] = {}
@@ -108,6 +110,10 @@ class ScenarioEngine:
         if self._started_at is None:
             self.start()
         elapsed = decimal_number(self.clock.now()) - self._started_at
+        if self.duration is not None:
+            elapsed = min(elapsed, decimal_number(self.duration))
+            tick_index, _ = decimal_divmod(elapsed, decimal_number(self.tick_interval))
+            elapsed = tick_index * decimal_number(self.tick_interval)
         for scenario in self.scenarios:
             local_elapsed = elapsed
             if scenario.repeat_every is not None:
@@ -126,4 +132,12 @@ class ScenarioEngine:
         self.start()
         while True:
             self.tick()
-            await asyncio.sleep(self.tick_interval)
+            elapsed = decimal_number(self.clock.now()) - self._started_at
+            if self.duration is not None and elapsed >= decimal_number(self.duration):
+                return
+            tick_index, _ = decimal_divmod(elapsed, decimal_number(self.tick_interval))
+            next_elapsed = (tick_index + 1) * decimal_number(self.tick_interval)
+            if self.duration is not None:
+                next_elapsed = min(next_elapsed, decimal_number(self.duration))
+            delay = self._started_at + next_elapsed - decimal_number(self.clock.now())
+            await asyncio.sleep(max(0.0, float(delay)))
