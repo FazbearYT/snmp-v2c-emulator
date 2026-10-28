@@ -234,3 +234,24 @@ def test_rejects_unknown_device_fields(level: str) -> None:
     (document if level == "device" else document["agent"])["unknown"] = 1
     with pytest.raises(ValidationError, match="Extra inputs"):
         DeviceConfig.model_validate(document)
+
+
+@pytest.mark.parametrize(
+    "agent",
+    [
+        {"host": ""},
+        {"host": "invalid"},
+        {"host": "::1"},
+        {"port": 0},
+        {"port": 65536},
+        {"port": True},
+        {"port": "1161"},
+        {"community": ""},
+        {"community": "\ud800"},
+    ],
+)
+def test_rejects_invalid_agent_values(agent: dict) -> None:
+    document = device_document()
+    document["agent"] = agent
+    with pytest.raises(ValidationError):
+        DeviceConfig.model_validate(document)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from ipaddress import IPv4Address
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
@@ -18,6 +19,12 @@ class DeviceConfig(BaseModel):
 
     agent: AgentConfig
     metrics: list[MetricConfig] = Field(min_length=1)
+
+    @field_validator("agent")
+    @classmethod
+    def validate_agent(cls, value: AgentConfig) -> AgentConfig:
+        IPv4Address(value.host)
+        return value
 
     @model_validator(mode="after")
     def validate_metrics(self) -> DeviceConfig:
