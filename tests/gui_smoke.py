@@ -59,6 +59,14 @@ async def verify_snmp(snapshot, port):
 
 def main():
     root = tk.Tk()
+    window_closed = False
+
+    def on_destroy(event):
+        nonlocal window_closed
+        if event.widget is root:
+            window_closed = True
+
+    root.bind("<Destroy>", on_destroy, add=True)
     panel = EmulatorPanel(root)
     try:
         with tempfile.TemporaryDirectory() as directory:
@@ -98,7 +106,7 @@ def main():
     finally:
         panel.controller.stop()
         pump(root, lambda: not panel.controller.active)
-        if root.tk.call("info", "commands", "winfo"):
+        if not window_closed:
             root.destroy()
     print("GUI, lifecycle and external SNMP GET/WALK passed")
 
