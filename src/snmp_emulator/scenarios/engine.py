@@ -106,10 +106,11 @@ class ScenarioEngine:
             self._scenario_baselines[scenario.name] = baseline
             self._scenario_cycles[scenario.name] = 0
 
-    def tick(self) -> None:
+    def tick(self) -> bool:
         if self._started_at is None:
             self.start()
         elapsed = decimal_number(self.clock.now()) - self._started_at
+        completed = self.duration is not None and elapsed >= decimal_number(self.duration)
         if self.duration is not None:
             elapsed = min(elapsed, decimal_number(self.duration))
             tick_index, _ = decimal_divmod(elapsed, decimal_number(self.tick_interval))
@@ -127,14 +128,14 @@ class ScenarioEngine:
                 active, value = action.value_at(local_elapsed)
                 if active:
                     self.store.update(action.metric, value)
+        return completed
 
     async def run(self) -> None:
         self.start()
         while True:
-            self.tick()
-            elapsed = decimal_number(self.clock.now()) - self._started_at
-            if self.duration is not None and elapsed >= decimal_number(self.duration):
+            if self.tick():
                 return
+            elapsed = decimal_number(self.clock.now()) - self._started_at
             tick_index, _ = decimal_divmod(elapsed, decimal_number(self.tick_interval))
             next_elapsed = (tick_index + 1) * decimal_number(self.tick_interval)
             if self.duration is not None:

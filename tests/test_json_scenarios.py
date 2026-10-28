@@ -139,3 +139,27 @@ async def test_run_uses_absolute_deadlines_and_stops_at_duration(monkeypatch) ->
     await engine.run()
     assert delays == pytest.approx([0.1, 0.07, 0.07, 0.02])
     assert store.get_by_name("cpu").value == 13
+
+
+@pytest.mark.asyncio
+async def test_crossing_duration_during_tick_does_not_skip_final_value(monkeypatch) -> None:
+    config = configuration({"type": "step", "step": 1, "limit": 100}, 0.3)
+    readings = iter(map(Decimal, ("0", "0.299", "0.301", "0.302", "0.303")))
+
+    class AdvancingClock:
+        def now(self):
+            return next(readings)
+
+    store = build_store(config)
+    engine = ScenarioEngine(
+        store, build_scenarios(config.scenarios), AdvancingClock(), tick_interval=0.1, duration=0.3
+    )
+    delays = []
+
+    async def wakeup(delay):
+        delays.append(delay)
+
+    monkeypatch.setattr(asyncio, "sleep", wakeup)
+    await engine.run()
+    assert store.get_by_name("cpu").value == 13
+    assert delays == [0.0]
