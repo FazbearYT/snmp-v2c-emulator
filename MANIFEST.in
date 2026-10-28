@@ -1,3 +1,5 @@
 include .python-version
 include uv.lock
 recursive-include examples *.yaml
+recursive-include examples *.json
+recursive-include tests *.py

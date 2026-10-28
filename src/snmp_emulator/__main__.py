@@ -12,6 +12,7 @@ from typing import Any
 from . import __version__
 from .application import EmulatorApplication
 from .config import ConfigurationError, load_config
+from .json_config import load_json_config
 
 LOGGER = logging.getLogger(__name__)
 
@@ -20,6 +21,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="SNMP v2c device emulator")
     parser.add_argument("--version", action="version", version=__version__)
     parser.add_argument("--config", type=Path, help="path to a YAML configuration")
+    parser.add_argument("--device-config", type=Path, help="path to a JSON device configuration")
+    parser.add_argument("--scenario", type=Path, help="path to a JSON scenario")
     parser.add_argument("--check-config", action="store_true")
     parser.add_argument(
         "--log-level",
@@ -64,11 +67,19 @@ async def run_application(
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
-    if args.config is None:
-        build_parser().error("--config is required unless --version is used")
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.config is not None:
+        if args.device_config is not None or args.scenario is not None:
+            parser.error("--config cannot be combined with --device-config or --scenario")
+    elif args.device_config is None or args.scenario is None:
+        parser.error("both --device-config and --scenario are required (or use --config for YAML)")
     try:
-        config = load_config(args.config)
+        config = (
+            load_config(args.config)
+            if args.config is not None
+            else load_json_config(args.device_config, args.scenario)
+        )
     except ConfigurationError as exc:
         print(f"configuration error: {exc}", file=sys.stderr)
         return 2

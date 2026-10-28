@@ -66,9 +66,14 @@ jobs:
           uv run --locked --python "3.13" --all-extras \
             pip-audit --strict --requirement "$RUNNER_TEMP/audit-requirements.txt"
       - name: Validate example configuration
-        run: >-
-          uv run --locked --python "3.13" --all-extras
-          python -m snmp_emulator --config examples/device.yaml --check-config
+        run: |
+          uv run --locked --python "3.13" --all-extras \
+            python -m snmp_emulator --config examples/device.yaml --check-config
+          for scenario in stable temperature-jump cpu-step; do
+            uv run --locked --python "3.13" --all-extras \
+              python -m snmp_emulator --device-config examples/device.json \
+              --scenario "examples/$scenario.json" --check-config
+          done
       - name: Build package
         run: uv build --clear
       - name: Validate package metadata
@@ -91,6 +96,11 @@ jobs:
           "$RUNNER_TEMP/sdist-venv/bin/snmp-emulator" \
             --config examples/device.yaml --check-config
           "$RUNNER_TEMP/sdist-venv/bin/python" tests/installed_smoke.py
+      - name: Verify examples with Net-SNMP
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y snmp
+          "$RUNNER_TEMP/wheel-venv/bin/python" tests/net_snmp_smoke.py
 
   windows:
     name: Windows smoke (Python 3.13)

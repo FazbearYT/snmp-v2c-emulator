@@ -26,8 +26,11 @@ class ObjectIdentifier:
 
     @classmethod
     def parse(cls, value: str) -> ObjectIdentifier:
+        normalized = value.removeprefix(".")
+        if any(not part.isascii() or not part.isdigit() for part in normalized.split(".")):
+            raise ValueError("OID components must be integers")
         try:
-            parts = tuple(int(part) for part in value.strip(".").split("."))
+            parts = tuple(int(part) for part in normalized.split("."))
         except ValueError as exc:
             raise ValueError("OID components must be integers") from exc
         return cls(parts)

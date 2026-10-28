@@ -32,7 +32,12 @@ class EmulatorApplication:
             config.agent.community,
             self.store,
         )
-        self.scenario_engine = ScenarioEngine(self.store, build_scenarios(config.scenarios))
+        self.scenario_engine = ScenarioEngine(
+            self.store,
+            build_scenarios(config.scenarios),
+            tick_interval=config.update_interval,
+            duration=config.duration,
+        )
 
     async def run(self) -> None:
         try:
