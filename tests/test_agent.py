@@ -287,7 +287,9 @@ async def test_bulk_limit_returns_protocol_response_instead_of_timeout(column_co
         )
         pdu = reply
         assert int(v2c.apiPDU.get_error_status(pdu)) == 0
-        assert not v2c.apiPDU.get_varbinds(pdu)
+        values = v2c.apiPDU.get_varbinds(pdu)
+        assert len(values) == 64
+        assert all(int(value) == 42 for _, value in values)
         reply = await exchange_raw_datagram(port, encode_bulk_request(prefix, 0, 1))
         values = v2c.apiPDU.get_varbinds(reply)
         assert int(values[0][1]) == 42
@@ -395,6 +397,52 @@ async def test_response_preserves_request_id_at_protocol_boundaries(request_id):
         )
         assert int(v2c.apiPDU.get_request_id(pdu)) == request_id
         assert int(v2c.apiPDU.get_varbinds(pdu)[0][1]) == 42
+    finally:
+        await agent.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("start_after_first", [False, True])
+async def test_oversized_bulk_returns_fitting_prefix_without_too_big(start_after_first):
+    port = reserve_udp_port()
+    first = ObjectIdentifier.parse("1.3.6.1.4.1.55555.1.0")
+    second = ObjectIdentifier.parse("1.3.6.1.4.1.55555.2.0")
+    store = MetricStore(
+        [
+            Metric("cpu", first, SnmpDataType.INTEGER32, 42),
+            Metric("payload", second, SnmpDataType.OCTET_STRING, "x" * 65535),
+        ]
+    )
+    agent = SnmpAgent("127.0.0.1", port, "public", store)
+    await agent.start()
+    try:
+        prefix = first if start_after_first else ObjectIdentifier.parse("1.3.6.1.4.1.55555")
+        pdu = await exchange_raw_datagram(port, encode_bulk_request(prefix, 0, 2))
+        assert int(v2c.apiPDU.get_error_status(pdu)) == 0
+        values = v2c.apiPDU.get_varbinds(pdu)
+        assert len(values) == (0 if start_after_first else 1)
+        if values:
+            assert int(values[0][1]) == 42
+    finally:
+        await agent.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("non_repeaters,column_count", [(20, 30), (65, 65)])
+async def test_bulk_response_budget_includes_non_repeaters(non_repeaters, column_count):
+    port = reserve_udp_port()
+    prefix = ObjectIdentifier.parse("1.3.6.1.4.1.55555")
+    oid = ObjectIdentifier.parse("1.3.6.1.4.1.55555.1.0")
+    agent = SnmpAgent(
+        "127.0.0.1", port, "public", MetricStore([Metric("cpu", oid, SnmpDataType.INTEGER32, 42)])
+    )
+    await agent.start()
+    try:
+        pdu = await exchange_raw_datagram(
+            port, encode_bulk_request(prefix, non_repeaters, 2**31 - 1, column_count)
+        )
+        assert int(v2c.apiPDU.get_error_status(pdu)) == 0
+        assert 0 < len(v2c.apiPDU.get_varbinds(pdu)) <= 64
     finally:
         await agent.stop()
 

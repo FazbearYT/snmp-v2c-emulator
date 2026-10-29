@@ -64,9 +64,27 @@ class V2cMessageProcessingModel(SnmpV2cMessageProcessingModel):
 
 
 class ResponseSizeGuard:
+    truncate_varbinds = False
+
     def __init__(self, *args: Any, community: bytes, **kwargs: Any) -> None:
         self._community = community
         super().__init__(*args, **kwargs)
+
+    def _response_fits(
+        self, response_pdu: Any, var_binds: list[tuple[Any, Any]], max_response_size: int
+    ) -> bool:
+        v2c.apiPDU.set_varbinds(response_pdu, var_binds)
+        maximum_request_id_pdu = response_pdu.clone(cloneValueFlag=True)
+        v2c.apiPDU.set_request_id(maximum_request_id_pdu, 2**31 - 1)
+        v2c.apiPDU.set_varbinds(maximum_request_id_pdu, var_binds)
+        response_message = v2c.Message()
+        v2c.apiMessage.set_defaults(response_message)
+        v2c.apiMessage.set_community(response_message, self._community)
+        v2c.apiMessage.set_pdu(response_message, maximum_request_id_pdu)
+        return (
+            len(encoder.encode(response_pdu)) <= max_response_size
+            and len(encoder.encode(response_message)) <= MAX_UDP_PAYLOAD_BYTES
+        )
 
     def send_varbinds(
         self,
@@ -82,21 +100,20 @@ class ResponseSizeGuard:
         max_response_size = int(pending[9])
         v2c.apiPDU.set_error_status(response_pdu, error_status)
         v2c.apiPDU.set_error_index(response_pdu, error_index)
-        v2c.apiPDU.set_varbinds(response_pdu, var_binds)
-        maximum_request_id_pdu = response_pdu.clone(cloneValueFlag=True)
-        v2c.apiPDU.set_request_id(maximum_request_id_pdu, 2**31 - 1)
-        v2c.apiPDU.set_varbinds(maximum_request_id_pdu, var_binds)
-        response_message = v2c.Message()
-        v2c.apiMessage.set_defaults(response_message)
-        v2c.apiMessage.set_community(response_message, self._community)
-        v2c.apiMessage.set_pdu(response_message, maximum_request_id_pdu)
-        if (
-            len(encoder.encode(response_pdu)) > max_response_size
-            or len(encoder.encode(response_message)) > MAX_UDP_PAYLOAD_BYTES
-        ):
-            error_status = "tooBig"
-            error_index = 0
-            var_binds = []
+        if not self._response_fits(response_pdu, var_binds, max_response_size):
+            if self.truncate_varbinds and not error_status:
+                lower, upper = 0, len(var_binds)
+                while lower < upper:
+                    middle = (lower + upper + 1) // 2
+                    if self._response_fits(response_pdu, var_binds[:middle], max_response_size):
+                        lower = middle
+                    else:
+                        upper = middle - 1
+                var_binds = var_binds[:lower]
+            else:
+                error_status = "tooBig"
+                error_index = 0
+                var_binds = []
         super().send_varbinds(  # type: ignore[misc]
             snmp_engine,
             state_reference,
@@ -115,6 +132,8 @@ class V2cNextCommandResponder(ResponseSizeGuard, cmdrsp.NextCommandResponder):
 
 
 class V2cBulkCommandResponder(ResponseSizeGuard, cmdrsp.BulkCommandResponder):
+    truncate_varbinds = True
+
     def handle_management_operation(
         self,
         snmp_engine: engine.SnmpEngine,
@@ -124,11 +143,16 @@ class V2cBulkCommandResponder(ResponseSizeGuard, cmdrsp.BulkCommandResponder):
     ) -> None:
         non_repeaters = max(int(v2c.apiBulkPDU.get_non_repeaters(pdu)), 0)
         max_repetitions = max(int(v2c.apiBulkPDU.get_max_repetitions(pdu)), 0)
-        request_var_binds = v2c.apiPDU.get_varbinds(pdu)
+        request_var_binds = v2c.apiPDU.get_varbinds(pdu)[: self.max_varbinds]
         non_repeater_count = min(non_repeaters, len(request_var_binds))
         repeater_count = max(len(request_var_binds) - non_repeater_count, 0)
         if repeater_count:
-            max_repetitions = min(max_repetitions, self.max_varbinds // repeater_count)
+            max_repetitions = min(
+                max_repetitions, (self.max_varbinds - non_repeater_count) // repeater_count
+            )
+        v2c.apiBulkPDU.set_non_repeaters(pdu, non_repeater_count)
+        v2c.apiBulkPDU.set_max_repetitions(pdu, max_repetitions)
+        v2c.apiPDU.set_varbinds(pdu, request_var_binds)
         if non_repeater_count == 0 and (max_repetitions == 0 or repeater_count == 0):
             self.send_varbinds(snmp_engine, state_reference, 0, 0, [])
             self.release_state_information(state_reference)
