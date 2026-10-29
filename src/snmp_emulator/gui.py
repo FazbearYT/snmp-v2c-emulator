@@ -192,6 +192,9 @@ class EmulatorPanel:
             variable.set(path)
 
     def start(self) -> None:
+        if self.console is not None and self.console.client.active:
+            self.error.set("Дождитесь завершения текущего SNMP-запроса или отмените его.")
+            return
         if self.controller.start(*self.selected_paths()):
             self._stopping = False
             self._history.clear()
@@ -201,7 +204,8 @@ class EmulatorPanel:
             self._set_active(True)
 
     def _set_active(self, active: bool) -> None:
-        self.start_button.configure(state="disabled" if active else "normal")
+        query_active = self.console is not None and self.console.client.active
+        self.start_button.configure(state="disabled" if active or query_active else "normal")
         self.stop_button.configure(state="normal" if active and not self._stopping else "disabled")
         for widget in self._inputs:
             state = "disabled" if active else "normal"
@@ -268,10 +272,14 @@ class EmulatorPanel:
         self.console.show()
 
     def _show_metrics(self, snapshot: PanelSnapshot) -> None:
-        duration = f" / {snapshot.duration:g} с" if snapshot.duration is not None else " с"
+        scenario_time = (
+            f"сценарий: {min(snapshot.elapsed, snapshot.duration):.1f} / {snapshot.duration:g} с · "
+            if snapshot.duration is not None
+            else ""
+        )
         self.details.set(
             f"UDP {snapshot.address} · community: {snapshot.community} · "
-            f"время {snapshot.elapsed:.1f}{duration}"
+            f"{scenario_time}эмулятор работает: {snapshot.elapsed:.1f} с"
         )
         numeric = {}
         for metric in snapshot.metrics:

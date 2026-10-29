@@ -3,10 +3,18 @@ from __future__ import annotations
 import queue
 import tkinter as tk
 from collections import deque
+from datetime import datetime
 from tkinter import ttk
 
 from .gui_controller import PanelSnapshot
-from .snmp_console import COMMANDS, ConsoleClient, parse_request, subtree_root, suggestions
+from .snmp_console import (
+    COMMAND_HELP,
+    LOCAL_COMMANDS,
+    ConsoleClient,
+    parse_request,
+    subtree_root,
+    suggestions,
+)
 
 
 class SnmpConsoleWindow:
@@ -30,6 +38,7 @@ class SnmpConsoleWindow:
         )
         self._build()
         self.command.trace_add("write", self._update_suggestions)
+        self._update_suggestions()
         self._append(
             "Консоль выполняет реальные SNMP v2c-запросы по UDP.\n"
             "Шаблон подставляет команду; Enter или «Выполнить» отправляет запрос.\n"
@@ -45,11 +54,13 @@ class SnmpConsoleWindow:
         ttk.Label(frame, textvariable=self.target).pack(anchor="w", pady=(6, 12))
         templates = ttk.Frame(frame)
         templates.pack(fill="x")
-        for operation in COMMANDS:
-            ttk.Button(
+        self.template_buttons = {}
+        for operation in COMMAND_HELP:
+            button = ttk.Button(
                 templates, text=operation, command=lambda op=operation: self.template(op)
-            ).pack(side="left", padx=(0, 8))
-        ttk.Button(templates, text="Справка", command=self.help).pack(side="right")
+            )
+            button.pack(side="left", padx=(0, 8))
+            self.template_buttons[operation] = button
         ttk.Label(frame, textvariable=self.hint, wraplength=900).pack(anchor="w", pady=(10, 6))
         command_row = ttk.Frame(frame)
         command_row.pack(fill="x")
@@ -67,9 +78,19 @@ class SnmpConsoleWindow:
             command_row, text="Отменить", command=self.client.cancel, state="disabled"
         )
         self.cancel_button.pack(side="left")
-        self.choices = tk.Listbox(frame, height=4, exportselection=False, font=("Consolas", 10))
-        self.choices.pack(fill="x", pady=(6, 10))
+        choices_frame = ttk.Frame(frame)
+        choices_frame.pack(fill="x", pady=(6, 10))
+        self.choices = tk.Listbox(
+            choices_frame, height=4, exportselection=False, font=("Consolas", 10)
+        )
+        self.choices_scrollbar = ttk.Scrollbar(choices_frame, command=self.choices.yview)
+        self.choices.configure(yscrollcommand=self.choices_scrollbar.set)
+        self.choices_scrollbar.pack(side="right", fill="y")
+        self.choices.pack(side="left", fill="x", expand=True)
         self.choices.bind("<<ListboxSelect>>", self._complete_selected)
+        self.choices.bind("<MouseWheel>", self._scroll_choices)
+        self.choices.bind("<Button-4>", lambda _: self._scroll_choices_units(-1))
+        self.choices.bind("<Button-5>", lambda _: self._scroll_choices_units(1))
         output_frame = ttk.Frame(frame)
         output_frame.pack(fill="both", expand=True)
         self.output = tk.Text(
@@ -109,22 +130,44 @@ class SnmpConsoleWindow:
         self.window.withdraw()
 
     def refresh(self, snapshot: PanelSnapshot, ready: bool) -> None:
+        self._drain_output()
+        session_changed = snapshot.session != self.snapshot.session
+        if session_changed:
+            self._event(f"Сеанс {snapshot.session} · {snapshot.profile}")
+        if session_changed or snapshot.state != self.snapshot.state:
+            message = {
+                "starting": "Загрузка конфигурации и запуск",
+                "running": f"Эмулятор запущен · UDP {snapshot.address}",
+                "completed": "Сценарий завершён · последние значения доступны по SNMP",
+                "stopped": "Эмулятор остановлен · UDP-порт освобождён",
+                "error": f"Ошибка эмулятора: {snapshot.error}",
+            }.get(snapshot.state)
+            if message:
+                self._event(message)
         changed = [(m.name, m.oid) for m in snapshot.metrics] != [
             (m.name, m.oid) for m in self.snapshot.metrics
         ]
         self.snapshot = snapshot
         self.ready = ready
         self.target.set(
-            f"SNMP v2c · UDP {snapshot.address}"
+            f"Сеанс {snapshot.session} · SNMP v2c · UDP {snapshot.address}"
             if ready
             else "Эмулятор остановлен. Запустите его в главном окне."
         )
-        self.run_button.configure(
-            state="normal" if ready and not self.client.active else "disabled"
-        )
+        self._update_run_button()
         self.cancel_button.configure(state="normal" if self.client.active else "disabled")
         if changed:
             self._update_suggestions()
+
+    def _event(self, message: str) -> None:
+        self._append(f"[{datetime.now().astimezone():%Y-%m-%d %H:%M:%S %z}] {message}")
+
+    def _update_run_button(self) -> None:
+        local = self.command.get().strip().upper() in LOCAL_COMMANDS
+        enabled = local or (self.ready and not self.client.active)
+        self.run_button.configure(state="normal" if enabled else "disabled")
+
+    def _drain_output(self) -> None:
         while True:
             try:
                 self._append(self.client.output.get_nowait())
@@ -134,7 +177,11 @@ class SnmpConsoleWindow:
     def template(self, operation: str) -> None:
         metrics = self.snapshot.metrics
         oid = str(metrics[0].oid) if metrics and operation == "GET" else subtree_root(metrics)
-        self.command.set(f"{operation} {oid}" + (" 5" if operation == "GETBULK" else ""))
+        self.command.set(
+            operation
+            if operation in LOCAL_COMMANDS
+            else f"{operation} {oid}" + (" 5" if operation == "GETBULK" else "")
+        )
         self.entry.focus_set()
         self.entry.icursor("end")
 
@@ -142,12 +189,23 @@ class SnmpConsoleWindow:
         text = self.command.get()
         operation = text.split()[0].upper() if text.split() else ""
         self.hint.set(
-            COMMANDS.get(operation, "GET / GETNEXT / WALK / GETBULK · введите OID или имя метрики")
+            COMMAND_HELP.get(operation, "Выберите команду; для SNMP введите OID или имя метрики")
         )
         self._suggestions = suggestions(text, self.snapshot.metrics)
         self.choices.delete(0, "end")
         for label, _ in self._suggestions:
             self.choices.insert("end", label)
+        self._update_run_button()
+
+    def _scroll_choices(self, event: tk.Event) -> str:
+        units = (
+            -max(1, abs(event.delta) // 120) if event.delta > 0 else max(1, abs(event.delta) // 120)
+        )
+        return self._scroll_choices_units(units)
+
+    def _scroll_choices_units(self, units: int) -> str:
+        self.choices.yview_scroll(units, "units")
+        return "break"
 
     def _complete_first(self, _event: object = None) -> str:
         if self._suggestions:
@@ -173,7 +231,7 @@ class SnmpConsoleWindow:
 
     def help(self) -> None:
         self._append(
-            "\n".join(COMMANDS.values()) + "\nWALK использует GETNEXT до конца ветки.\n"
+            "\n".join(COMMAND_HELP.values()) + "\nWALK использует GETNEXT до конца ветки.\n"
             "GETBULK: non-repeaters=0, количество — max-repetitions (по умолчанию 5).\n"
             "OID можно вводить вручную, включая отсутствующие, или выбрать из подсказок.\n"
             "Таймаут ответа 1 с, без повторов. WALK: до 256 метрик, максимум 15 с.\n"

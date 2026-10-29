@@ -28,6 +28,11 @@ COMMANDS = {
     "WALK": "WALK <корень OID> — обход ветки последовательными GETNEXT",
     "GETBULK": "GETBULK <OID> [количество 1–50] — следующие значения одним запросом",
 }
+LOCAL_COMMANDS = {
+    "HELP": "HELP — справка по командам и работе консоли",
+    "CLEAR": "CLEAR — очистить видимые ответы, сохранив историю ввода",
+}
+COMMAND_HELP = {**COMMANDS, **LOCAL_COMMANDS}
 ALIASES = {
     "GETWALK": "WALK",
     "SNMPWALK": "WALK",
@@ -82,7 +87,11 @@ def suggestions(text: str, metrics: tuple[Metric, ...]) -> list[tuple[str, str]]
     parts = text.split()
     if len(parts) < 2 and not text.endswith(" "):
         prefix = text.upper()
-        return [(command, command + " ") for command in COMMANDS if command.startswith(prefix)]
+        return [
+            (command, command if command in LOCAL_COMMANDS else command + " ")
+            for command in COMMAND_HELP
+            if command.startswith(prefix)
+        ]
     operation = ALIASES.get(parts[0].upper(), parts[0].upper()) if parts else ""
     if operation not in COMMANDS or len(parts) > 2:
         return []
@@ -94,7 +103,7 @@ def suggestions(text: str, metrics: tuple[Metric, ...]) -> list[tuple[str, str]]
         (f"{name} · {oid}", f"{operation} {oid}")
         for name, oid in candidates
         if not token or oid.startswith(token.lstrip(".")) or token.casefold() in name.casefold()
-    ][:12]
+    ]
 
 
 class ConsoleClient:
