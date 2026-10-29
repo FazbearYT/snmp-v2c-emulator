@@ -243,3 +243,12 @@ async def test_sigterm_requests_graceful_application_stop() -> None:
     assert await task is True
     assert application.stopped
     assert loop.removed == signal.SIGTERM
+
+
+def test_cli_rejects_deep_yaml_without_traceback(tmp_path, capsys):
+    path = tmp_path / "deep.yaml"
+    path.write_text("[" * 1200 + "0" + "]" * 1200, encoding="utf-8")
+    assert cli.main(["--config", str(path), "--check-config"]) == 2
+    error = capsys.readouterr().err
+    assert "invalid YAML" in error
+    assert "Traceback" not in error

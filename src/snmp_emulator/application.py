@@ -26,6 +26,7 @@ class EmulatorApplication:
     def __init__(self, config: EmulatorConfig) -> None:
         self.config = config
         self.started = asyncio.Event()
+        self._running = False
         self.store = build_store(config)
         self.agent = SnmpAgent(
             config.agent.host,
@@ -41,6 +42,9 @@ class EmulatorApplication:
         )
 
     async def run(self) -> None:
+        if self._running:
+            raise RuntimeError("emulator application is already running")
+        self._running = True
         try:
             await self.agent.start()
             self.started.set()
@@ -49,4 +53,7 @@ class EmulatorApplication:
                 tasks.create_task(asyncio.Event().wait())
         finally:
             self.started.clear()
-            await self.agent.stop()
+            try:
+                await self.agent.stop()
+            finally:
+                self._running = False

@@ -14,6 +14,7 @@ from pysnmp.hlapi.v3arch.asyncio import (
     bulk_cmd,
     get_cmd,
     next_cmd,
+    set_cmd,
 )
 from pysnmp.proto import rfc1901, rfc1902
 from pysnmp.proto.api import v2c
@@ -95,12 +96,16 @@ def encode_bulk_request(
     oid: ObjectIdentifier,
     non_repeaters: int,
     max_repetitions: int,
+    column_count: int = 1,
+    request_id: int | None = None,
 ) -> bytes:
     pdu = LenientGetBulkRequestPdu()
     v2c.apiBulkPDU.set_defaults(pdu)
+    if request_id is not None:
+        v2c.apiPDU.set_request_id(pdu, request_id)
     v2c.apiBulkPDU.set_non_repeaters(pdu, non_repeaters)
     v2c.apiBulkPDU.set_max_repetitions(pdu, max_repetitions)
-    v2c.apiPDU.set_varbinds(pdu, [(rfc1902.ObjectName(oid.parts), rfc1902.Null(""))])
+    v2c.apiPDU.set_varbinds(pdu, [(rfc1902.ObjectName(oid.parts), rfc1902.Null(""))] * column_count)
     message = V2cMessage()
     v2c.apiMessage.set_defaults(message)
     v2c.apiMessage.set_community(message, b"public")
@@ -264,6 +269,181 @@ async def test_returns_too_big_for_oversized_response() -> None:
         assert not var_binds
     finally:
         client_engine.close_dispatcher()
+        await agent.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("column_count", [65, 256])
+async def test_bulk_limit_returns_protocol_response_instead_of_timeout(column_count):
+    port = reserve_udp_port()
+    prefix = ObjectIdentifier.parse("1.3.6.1.4.1.55555")
+    oid = ObjectIdentifier.parse("1.3.6.1.4.1.55555.1.0")
+    store = MetricStore([Metric("cpu", oid, SnmpDataType.INTEGER32, 42)])
+    agent = SnmpAgent("127.0.0.1", port, "public", store)
+    await agent.start()
+    try:
+        reply = await exchange_raw_datagram(
+            port, encode_bulk_request(prefix, 0, 2**31 - 1, column_count)
+        )
+        pdu = reply
+        assert int(v2c.apiPDU.get_error_status(pdu)) == 0
+        values = v2c.apiPDU.get_varbinds(pdu)
+        assert len(values) == 64
+        assert all(int(value) == 42 for _, value in values)
+        reply = await exchange_raw_datagram(port, encode_bulk_request(prefix, 0, 1))
+        values = v2c.apiPDU.get_varbinds(reply)
+        assert int(values[0][1]) == 42
+    finally:
+        await agent.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "community_size,payload_size,too_big",
+    [(6, 65000, False), (60000, 100, False), (60000, 10000, True)],
+)
+async def test_response_size_includes_long_community(community_size, payload_size, too_big):
+    port = reserve_udp_port()
+    oid = ObjectIdentifier.parse("1.3.6.1.4.1.55555.1.0")
+    store = MetricStore([Metric("payload", oid, SnmpDataType.OCTET_STRING, "x" * payload_size)])
+    community = "x" * community_size
+    agent = SnmpAgent("127.0.0.1", port, community, store)
+    client = engine.SnmpEngine()
+    await agent.start()
+    try:
+        target = await UdpTransportTarget.create(("127.0.0.1", port), timeout=1, retries=0)
+        error, status, index, values = await get_cmd(
+            client,
+            CommunityData(community.encode(), mpModel=1),
+            target,
+            ContextData(),
+            ObjectType(ObjectIdentity(str(oid))),
+        )
+        assert error is None
+        if too_big:
+            assert status.prettyPrint() == "tooBig"
+            assert int(index) == 0
+            assert not values
+        else:
+            assert not status
+            assert values[0][1].asOctets() == b"x" * payload_size
+    finally:
+        client.close_dispatcher()
+        await agent.stop()
+
+
+@pytest.mark.asyncio
+async def test_failed_engine_construction_releases_bound_socket(monkeypatch):
+    port = reserve_udp_port()
+    agent = SnmpAgent("127.0.0.1", port, "public", MetricStore([]))
+
+    def fail_engine():
+        raise RuntimeError("engine setup failed")
+
+    monkeypatch.setattr("snmp_emulator.adapters.pysnmp_agent.engine.SnmpEngine", fail_engine)
+    with pytest.raises(RuntimeError, match="engine setup failed") as failure:
+        await agent.start()
+    assert failure.value
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+        probe.bind(("127.0.0.1", port))
+
+
+@pytest.mark.asyncio
+async def test_set_request_cannot_change_metrics():
+    port = reserve_udp_port()
+    oid = ObjectIdentifier.parse("1.3.6.1.4.1.55555.1.0")
+    store = MetricStore([Metric("cpu", oid, SnmpDataType.INTEGER32, 42)])
+    agent = SnmpAgent("127.0.0.1", port, "public", store)
+    client = engine.SnmpEngine()
+    await agent.start()
+    try:
+        target = await UdpTransportTarget.create(("127.0.0.1", port), timeout=0.1, retries=0)
+        error, status, _, _ = await set_cmd(
+            client,
+            CommunityData("public", mpModel=1),
+            target,
+            ContextData(),
+            ObjectType(ObjectIdentity(str(oid)), rfc1902.Integer32(99)),
+        )
+        assert error is not None or status
+        assert store.get(oid).value == 42
+        error, status, _, values = await get_cmd(
+            client,
+            CommunityData("public", mpModel=1),
+            target,
+            ContextData(),
+            ObjectType(ObjectIdentity(str(oid))),
+        )
+        assert error is None and not status
+        assert int(values[0][1]) == 42
+    finally:
+        client.close_dispatcher()
+        await agent.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("request_id", [-(2**31), 0, 2**31 - 1])
+async def test_response_preserves_request_id_at_protocol_boundaries(request_id):
+    port = reserve_udp_port()
+    prefix = ObjectIdentifier.parse("1.3.6.1.4.1.55555")
+    oid = ObjectIdentifier.parse("1.3.6.1.4.1.55555.1.0")
+    agent = SnmpAgent(
+        "127.0.0.1", port, "public", MetricStore([Metric("cpu", oid, SnmpDataType.INTEGER32, 42)])
+    )
+    await agent.start()
+    try:
+        pdu = await exchange_raw_datagram(
+            port, encode_bulk_request(prefix, 0, 1, request_id=request_id)
+        )
+        assert int(v2c.apiPDU.get_request_id(pdu)) == request_id
+        assert int(v2c.apiPDU.get_varbinds(pdu)[0][1]) == 42
+    finally:
+        await agent.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("start_after_first", [False, True])
+async def test_oversized_bulk_returns_fitting_prefix_without_too_big(start_after_first):
+    port = reserve_udp_port()
+    first = ObjectIdentifier.parse("1.3.6.1.4.1.55555.1.0")
+    second = ObjectIdentifier.parse("1.3.6.1.4.1.55555.2.0")
+    store = MetricStore(
+        [
+            Metric("cpu", first, SnmpDataType.INTEGER32, 42),
+            Metric("payload", second, SnmpDataType.OCTET_STRING, "x" * 65535),
+        ]
+    )
+    agent = SnmpAgent("127.0.0.1", port, "public", store)
+    await agent.start()
+    try:
+        prefix = first if start_after_first else ObjectIdentifier.parse("1.3.6.1.4.1.55555")
+        pdu = await exchange_raw_datagram(port, encode_bulk_request(prefix, 0, 2))
+        assert int(v2c.apiPDU.get_error_status(pdu)) == 0
+        values = v2c.apiPDU.get_varbinds(pdu)
+        assert len(values) == (0 if start_after_first else 1)
+        if values:
+            assert int(values[0][1]) == 42
+    finally:
+        await agent.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("non_repeaters,column_count", [(20, 30), (65, 65)])
+async def test_bulk_response_budget_includes_non_repeaters(non_repeaters, column_count):
+    port = reserve_udp_port()
+    prefix = ObjectIdentifier.parse("1.3.6.1.4.1.55555")
+    oid = ObjectIdentifier.parse("1.3.6.1.4.1.55555.1.0")
+    agent = SnmpAgent(
+        "127.0.0.1", port, "public", MetricStore([Metric("cpu", oid, SnmpDataType.INTEGER32, 42)])
+    )
+    await agent.start()
+    try:
+        pdu = await exchange_raw_datagram(
+            port, encode_bulk_request(prefix, non_repeaters, 2**31 - 1, column_count)
+        )
+        assert int(v2c.apiPDU.get_error_status(pdu)) == 0
+        assert 0 < len(v2c.apiPDU.get_varbinds(pdu)) <= 64
+    finally:
         await agent.stop()
 
 

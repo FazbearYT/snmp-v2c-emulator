@@ -21,6 +21,7 @@ from pysnmp.proto import rfc1905
 
 from .domain.metric import Metric
 from .domain.oid import ObjectIdentifier
+from .domain.types import encode_octet_string
 
 COMMANDS = {
     "GET": "GET <OID или имя> — значение конкретной метрики",
@@ -153,7 +154,12 @@ class ConsoleClient:
                 root = current
                 count = 0
                 while not self._cancel.is_set():
-                    args = (client, CommunityData(community, mpModel=1), target, ContextData())
+                    args = (
+                        client,
+                        CommunityData(encode_octet_string(community), mpModel=1),
+                        target,
+                        ContextData(),
+                    )
                     variable = ObjectType(ObjectIdentity(current))
                     if request.operation == "GETBULK":
                         result = await bulk_cmd(*args, 0, request.repetitions, variable)

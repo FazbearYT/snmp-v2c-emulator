@@ -282,7 +282,7 @@ def load_config(path: str | Path) -> EmulatorConfig:
         raise ConfigurationError(f"cannot read {source}: {exc}") from exc
     except UnicodeError as exc:
         raise ConfigurationError(f"cannot decode {source} as UTF-8: {exc}") from exc
-    except yaml.YAMLError as exc:
+    except (yaml.YAMLError, RecursionError) as exc:
         raise ConfigurationError(f"invalid YAML: {exc}") from exc
     except ValidationError as exc:
         raise ConfigurationError(str(exc)) from exc
