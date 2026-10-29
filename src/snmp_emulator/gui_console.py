@@ -66,7 +66,6 @@ class SnmpConsoleWindow:
         command_row.pack(fill="x")
         self.entry = ttk.Entry(command_row, textvariable=self.command, font=("Consolas", 11))
         self.entry.pack(side="left", fill="x", expand=True)
-        self.entry.bind("<Return>", lambda _: self.execute())
         self.entry.bind("<Tab>", self._complete_first)
         self.entry.bind("<Up>", lambda _: self._recall(-1))
         self.entry.bind("<Down>", lambda _: self._recall(1))
@@ -112,6 +111,19 @@ class SnmpConsoleWindow:
         vertical.grid(row=0, column=1, sticky="ns")
         horizontal.grid(row=1, column=0, sticky="ew")
 
+        for widget in (self.entry, self.choices, self.run_button, *self.template_buttons.values()):
+            widget.bind("<Return>", self._submit_key)
+            widget.bind("<KP_Enter>", self._submit_key)
+
+    def _submit_key(self, _event: tk.Event) -> str:
+        self.execute()
+        return "break"
+
+    def _focus_command_entry(self) -> None:
+        self.entry.icursor("end")
+        self.entry.focus_set()
+        self.window.after_idle(self.entry.focus_set)
+
     def _append(self, text: str) -> None:
         self.output.configure(state="normal")
         self.output.insert("end", text + "\n")
@@ -123,7 +135,7 @@ class SnmpConsoleWindow:
     def show(self) -> None:
         self.window.deiconify()
         self.window.lift()
-        self.entry.focus_set()
+        self._focus_command_entry()
 
     def hide(self) -> None:
         self.client.cancel()
@@ -182,8 +194,7 @@ class SnmpConsoleWindow:
             if operation in LOCAL_COMMANDS
             else f"{operation} {oid}" + (" 5" if operation == "GETBULK" else "")
         )
-        self.entry.focus_set()
-        self.entry.icursor("end")
+        self._focus_command_entry()
 
     def _update_suggestions(self, *_args: object) -> None:
         text = self.command.get()
@@ -218,8 +229,7 @@ class SnmpConsoleWindow:
         if selected:
             replacement = self._suggestions[selected[0]][1]
             self.command.set(replacement)
-            self.entry.focus_set()
-            self.entry.icursor("end")
+            self._focus_command_entry()
 
     def _recall(self, step: int) -> str:
         self._history_index = min(len(self._history), max(0, self._history_index + step))
