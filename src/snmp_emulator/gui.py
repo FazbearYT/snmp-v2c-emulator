@@ -185,8 +185,14 @@ class EmulatorPanel:
         return Path(self.device.get()), Path(self.scenario.get())
 
     def _browse(self, variable: tk.StringVar) -> None:
+        initial_directory = Path(variable.get()).parent if variable.get() else self._examples
+        if not initial_directory.is_dir():
+            initial_directory = self._examples
         path = filedialog.askopenfilename(
-            parent=self.root, title="Выберите готовый JSON-файл", filetypes=[("JSON", "*.json")]
+            parent=self.root,
+            title="Выберите готовый JSON-файл",
+            initialdir=str(initial_directory.resolve()),
+            filetypes=[("JSON", "*.json")],
         )
         if path:
             variable.set(path)
