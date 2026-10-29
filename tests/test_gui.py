@@ -4,13 +4,17 @@ import os
 import time
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from installed_smoke import reserve_udp_port
 
 tk = pytest.importorskip("tkinter")
 
+from snmp_emulator.application import build_store  # noqa: E402
 from snmp_emulator.gui import PROFILES, EmulatorPanel  # noqa: E402
+from snmp_emulator.gui_controller import PanelSnapshot  # noqa: E402
+from snmp_emulator.json_config import load_json_config  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -208,3 +212,64 @@ def test_device_profiles_populate_table_and_console(window, profile, count, bran
     assert len(suggestions) == count
     assert all(f"1.3.6.1.4.1.55555.{branch}." in item for item in suggestions)
     assert set(panel.table.get_children()) == {item["name"] for item in document["metrics"]}
+
+
+def test_scenario_time_is_separate_from_emulator_uptime(window):
+    _, panel = window
+    device, scenario = panel.selected_paths()
+    metrics = build_store(load_json_config(device, scenario)).snapshot()
+    panel._show_metrics(
+        PanelSnapshot(metrics=metrics, elapsed=25.6, duration=20, state="completed")
+    )
+    assert "сценарий: 20.0 / 20 с" in panel.details.get()
+    assert "эмулятор работает: 25.6 с" in panel.details.get()
+
+
+def test_console_marks_each_run_and_retains_previous_output(window):
+    root, panel = window
+    panel.start()
+    pump_until(root, lambda: bool(panel.table.get_children()))
+    panel.open_console()
+    console = panel.console
+    assert "Сеанс 1" in console.output.get("1.0", "end")
+    console._append("Ответ предыдущего запуска")
+    before = console.output.get("1.0", "end")
+    console.refresh(panel.controller.snapshot(), True)
+    assert console.output.get("1.0", "end") == before
+    panel.stop()
+    pump_until(root, lambda: not panel.controller.active)
+    console.refresh(panel.controller.snapshot(), False)
+    assert "Эмулятор остановлен" in console.output.get("1.0", "end")
+    panel.start()
+    pump_until(root, lambda: panel.controller.snapshot().state == "running")
+    console.refresh(panel.controller.snapshot(), True)
+    output = console.output.get("1.0", "end")
+    assert output.index("Ответ предыдущего запуска") < output.index("Сеанс 2")
+    assert output.count("Сеанс 2") == 1
+    assert "device.json" in output
+    assert "Сеанс 2" in console.target.get()
+
+
+def test_local_templates_work_without_running_emulator_and_choices_scroll(window):
+    root, panel = window
+    panel.open_console()
+    console = panel.console
+    assert set(console.template_buttons) == {"GET", "GETNEXT", "WALK", "GETBULK", "HELP", "CLEAR"}
+    assert console.choices.size() == 6
+    root.update_idletasks()
+    console.choices.yview_moveto(0)
+    assert console._scroll_choices(SimpleNamespace(delta=-120)) == "break"
+    assert console.choices.yview()[0] > 0
+    console._scroll_choices(SimpleNamespace(delta=120))
+    assert console.choices.yview()[0] == 0
+    assert console.choices_scrollbar.winfo_manager() == "pack"
+    console.template_buttons["HELP"].invoke()
+    assert console.command.get() == "HELP"
+    assert str(console.run_button["state"]) == "normal"
+    console.run_button.invoke()
+    assert "CLEAR —" in console.output.get("1.0", "end")
+    console.template_buttons["CLEAR"].invoke()
+    assert console.command.get() == "CLEAR"
+    console.run_button.invoke()
+    assert not console.output.get("1.0", "end").strip()
+    assert not console.client.active

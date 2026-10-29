@@ -36,6 +36,8 @@ class PanelSnapshot:
     address: str = ""
     community: str = ""
     error: str = ""
+    session: int = 0
+    profile: str = ""
 
 
 class PanelController:
@@ -44,6 +46,7 @@ class PanelController:
         self._snapshot = PanelSnapshot()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        self._session = 0
 
     @property
     def active(self) -> bool:
@@ -61,8 +64,11 @@ class PanelController:
         if self.active:
             return False
         self._stop.clear()
+        self._session += 1
         with self._lock:
-            self._snapshot = PanelSnapshot(state="starting")
+            self._snapshot = PanelSnapshot(
+                state="starting", session=self._session, profile=f"{device.name} + {scenario.name}"
+            )
         self._thread = threading.Thread(target=self._run, args=(device, scenario))
         self._thread.start()
         return True

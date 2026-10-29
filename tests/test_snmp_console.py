@@ -76,6 +76,8 @@ def test_context_completion_uses_loaded_metrics(metrics):
     assert subtree_root(metrics) == "1.3.6.1.4.1.55555.1"
     assert subtree_root(metrics[:1]) == "1.3.6.1.4.1.55555.1.1"
     assert subtree_root(()) == "1.3.6.1"
+    assert suggestions("HE", metrics) == [("HELP", "HELP")]
+    assert suggestions("CL", metrics) == [("CLEAR", "CLEAR")]
 
 
 @pytest.fixture
