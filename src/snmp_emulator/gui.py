@@ -7,19 +7,25 @@ from pathlib import Path
 from tkinter import filedialog, ttk
 
 from .gui_console import SnmpConsoleWindow
-from .gui_controller import PanelController, PanelSnapshot, examples_directory
+from .gui_controller import PROFILES, PanelController, PanelSnapshot, examples_directory
 
-PROFILES = {
-    "Стабильные показатели": "stable.json",
-    "Скачок температуры": "temperature-jump.json",
-    "Рост загрузки процессора": "cpu-step.json",
-}
 METRIC_LABELS = {
     "cpu_usage": "Загрузка процессора",
     "temperature": "Температура",
     "description": "Описание устройства",
     "memory_usage": "Использование памяти",
     "status": "Состояние устройства",
+    "port_count": "Количество портов",
+    "active_ports": "Активные порты",
+    "inbound_mbps": "Входящий трафик, Мбит/с",
+    "outbound_mbps": "Исходящий трафик, Мбит/с",
+    "battery_charge": "Заряд батареи, %",
+    "load_percent": "Нагрузка ИБП, %",
+    "input_voltage": "Входное напряжение, В",
+    "output_voltage": "Выходное напряжение, В",
+    "runtime_minutes": "Запас работы, мин",
+    "battery_temperature": "Температура батареи, °C",
+    "power_source": "Источник питания",
 }
 STATES = {
     "idle": "Готов к запуску",
@@ -174,7 +180,8 @@ class EmulatorPanel:
 
     def selected_paths(self) -> tuple[Path, Path]:
         if self.mode.get() == "preset":
-            return self._examples / "device.json", self._examples / PROFILES[self.profile.get()]
+            device, scenario = PROFILES[self.profile.get()]
+            return self._examples / device, self._examples / scenario
         return Path(self.device.get()), Path(self.scenario.get())
 
     def _browse(self, variable: tk.StringVar) -> None:

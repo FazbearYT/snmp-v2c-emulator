@@ -29,11 +29,24 @@ from snmp_emulator.domain.store import MetricStore
 from snmp_emulator.domain.types import SnmpDataType
 from snmp_emulator.json_config import load_json_config
 
-JSON_SCENARIOS = ("stable", "temperature-jump", "cpu-step")
+JSON_PROFILES = {
+    "stable": ("device.json", {}),
+    "temperature-jump": ("device.json", {"temperature": 80}),
+    "cpu-step": ("device.json", {"cpu_usage": 90}),
+    "switch-traffic": (
+        "switch-device.json",
+        {"cpu_usage": 70, "inbound_mbps": 600, "outbound_mbps": 440},
+    ),
+    "ups-battery": (
+        "ups-device.json",
+        {"battery_charge": 20, "input_voltage": 0, "runtime_minutes": 6, "power_source": "battery"},
+    ),
+}
+JSON_SCENARIOS = tuple(JSON_PROFILES)
 
 
 async def smoke_json_scenario(examples: Path, name: str) -> None:
-    config = load_json_config(examples / "device.json", examples / f"{name}.json")
+    config = load_json_config(examples / JSON_PROFILES[name][0], examples / f"{name}.json")
     document = config.model_dump(mode="json")
     document["agent"].update(host="127.0.0.1", port=reserve_udp_port())
     document["duration"] /= 100
@@ -72,10 +85,13 @@ async def smoke_json_scenario(examples: Path, name: str) -> None:
         if task.done():
             raise RuntimeError("application stopped after duration")
         expected = {item.oid: item.initial for item in config.metrics}
-        if name == "temperature-jump":
-            expected["1.3.6.1.4.1.55555.1.2.0"] = 80
-        elif name == "cpu-step":
-            expected["1.3.6.1.4.1.55555.1.1.0"] = 90
+        expected.update(
+            {
+                item.oid: JSON_PROFILES[name][1][item.name]
+                for item in config.metrics
+                if item.name in JSON_PROFILES[name][1]
+            }
+        )
         for metric in config.metrics:
             _, value = await request(get_cmd, metric.oid)
             actual = (
@@ -136,7 +152,7 @@ async def smoke_installed_json() -> None:
                 "-m",
                 "snmp_emulator",
                 "--device-config",
-                str(examples / "device.json"),
+                str(examples / JSON_PROFILES[name][0]),
                 "--scenario",
                 str(examples / f"{name}.json"),
                 "--check-config",

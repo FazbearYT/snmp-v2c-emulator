@@ -69,7 +69,7 @@ def pump_until(root, predicate):
 def test_window_controls_real_application(window):
     root, panel = window
     panel.profile.set("Рост загрузки процессора")
-    assert PROFILES[panel.profile.get()] == "cpu-step.json"
+    assert PROFILES[panel.profile.get()] == ("device.json", "cpu-step.json")
     panel.scenario.set(str(panel._examples / "cpu-step.json"))
     panel.start()
     panel.start()
@@ -179,3 +179,32 @@ def test_closing_panel_cancels_pending_console_request(window):
     console.hide()
     panel.close()
     pump_until(root, lambda: not panel.controller.active and not console.client.active)
+
+
+@pytest.mark.parametrize(
+    "profile,count,branch",
+    [
+        ("Коммутатор: рост трафика", 7, "2"),
+        ("ИБП: отключение питания", 8, "3"),
+    ],
+)
+def test_device_profiles_populate_table_and_console(window, profile, count, branch):
+    root, panel = window
+    custom_device = Path(panel.device.get())
+    panel.mode.set("preset")
+    panel.profile.set(profile)
+    device_path, scenario_path = panel.selected_paths()
+    document = json.loads(device_path.read_text(encoding="utf-8"))
+    assert 5 <= len(document["metrics"]) <= 10
+    document["agent"]["port"] = reserve_udp_port()
+    custom_device.write_text(json.dumps(document), encoding="utf-8")
+    panel.mode.set("custom")
+    panel.scenario.set(str(scenario_path))
+    panel.start()
+    pump_until(root, lambda: len(panel.table.get_children()) == count)
+    panel.open_console()
+    panel.console.command.set("GET ")
+    suggestions = panel.console.choices.get(0, "end")
+    assert len(suggestions) == count
+    assert all(f"1.3.6.1.4.1.55555.{branch}." in item for item in suggestions)
+    assert set(panel.table.get_children()) == {item["name"] for item in document["metrics"]}

@@ -12,6 +12,14 @@ from .application import EmulatorApplication
 from .domain.metric import Metric
 from .json_config import load_json_config
 
+PROFILES = {
+    "Стабильные показатели": ("device.json", "stable.json"),
+    "Скачок температуры": ("device.json", "temperature-jump.json"),
+    "Рост загрузки процессора": ("device.json", "cpu-step.json"),
+    "Коммутатор: рост трафика": ("switch-device.json", "switch-traffic.json"),
+    "ИБП: отключение питания": ("ups-device.json", "ups-battery.json"),
+}
+
 
 def examples_directory() -> Path:
     installed = Path(sysconfig.get_path("data")) / "share" / "snmp-v2c-emulator" / "examples"
