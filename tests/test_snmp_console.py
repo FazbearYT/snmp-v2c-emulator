@@ -81,10 +81,17 @@ def test_context_completion_uses_loaded_metrics(metrics):
 
 
 @pytest.fixture
-async def running_application():
+async def running_application(request):
     config = load_json_config(EXAMPLES / "device.json", EXAMPLES / "stable.json")
     config = config.model_copy(
-        update={"agent": config.agent.model_copy(update={"port": reserve_udp_port()})}
+        update={
+            "agent": config.agent.model_copy(
+                update={
+                    "port": reserve_udp_port(),
+                    "community": getattr(request, "param", "public"),
+                }
+            )
+        }
     )
     application = EmulatorApplication(config)
     task = asyncio.create_task(application.run())
@@ -184,3 +191,18 @@ async def test_walk_stays_inside_requested_subtree(running_application):
     assert output.count(" = ") == 1
     assert "1.3.6.1.4.1.55555.1.2.0 = " in output
     assert "получено метрик: 1" in output
+
+
+@pytest.mark.parametrize("running_application", ["тест", "café"], indirect=True)
+async def test_console_uses_same_utf8_community_as_agent(running_application):
+    application = running_application
+    client = ConsoleClient()
+    client.start(
+        Request("GET", str(application.store.snapshot()[0].oid)),
+        "127.0.0.1",
+        application.config.agent.port,
+        application.config.agent.community,
+    )
+    output = await output_when_done(client)
+    assert "Ошибка" not in output
+    assert output.count(" = ") == 1

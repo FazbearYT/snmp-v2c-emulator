@@ -7,6 +7,15 @@ import pytest
 
 from snmp_emulator import __main__ as cli
 
+
+def test_cli_rejects_deep_yaml_without_traceback(tmp_path, capsys):
+    path = tmp_path / "deep.yaml"
+    path.write_text("[" * 1200 + "0" + "]" * 1200, encoding="utf-8")
+    assert cli.main(["--config", str(path), "--check-config"]) == 2
+    error = capsys.readouterr().err
+    assert "invalid YAML" in error
+    assert "Traceback" not in error
+
 EXAMPLE_CONFIG = Path(__file__).parents[1] / "examples" / "device.yaml"
 JSON_DEVICE = EXAMPLE_CONFIG.with_suffix(".json")
 JSON_SCENARIO = EXAMPLE_CONFIG.parent / "cpu-step.json"
