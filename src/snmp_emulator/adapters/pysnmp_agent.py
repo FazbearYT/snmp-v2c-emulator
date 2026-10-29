@@ -22,6 +22,7 @@ from ..domain.store import MetricStore
 from ..domain.types import SnmpDataType, encode_octet_string
 
 LOGGER = logging.getLogger(__name__)
+MAX_UDP_PAYLOAD_BYTES = 65507
 
 
 class LenientBulkPdu(rfc1905.BulkPDU):
@@ -63,6 +64,10 @@ class V2cMessageProcessingModel(SnmpV2cMessageProcessingModel):
 
 
 class ResponseSizeGuard:
+    def __init__(self, *args: Any, community: bytes, **kwargs: Any) -> None:
+        self._community = community
+        super().__init__(*args, **kwargs)
+
     def send_varbinds(
         self,
         snmp_engine: engine.SnmpEngine,
@@ -78,7 +83,17 @@ class ResponseSizeGuard:
         v2c.apiPDU.set_error_status(response_pdu, error_status)
         v2c.apiPDU.set_error_index(response_pdu, error_index)
         v2c.apiPDU.set_varbinds(response_pdu, var_binds)
-        if len(encoder.encode(response_pdu)) > max_response_size:
+        maximum_request_id_pdu = response_pdu.clone(cloneValueFlag=True)
+        v2c.apiPDU.set_request_id(maximum_request_id_pdu, 2**31 - 1)
+        v2c.apiPDU.set_varbinds(maximum_request_id_pdu, var_binds)
+        response_message = v2c.Message()
+        v2c.apiMessage.set_defaults(response_message)
+        v2c.apiMessage.set_community(response_message, self._community)
+        v2c.apiMessage.set_pdu(response_message, maximum_request_id_pdu)
+        if (
+            len(encoder.encode(response_pdu)) > max_response_size
+            or len(encoder.encode(response_message)) > MAX_UDP_PAYLOAD_BYTES
+        ):
             error_status = "tooBig"
             error_index = 0
             var_binds = []
@@ -112,6 +127,8 @@ class V2cBulkCommandResponder(ResponseSizeGuard, cmdrsp.BulkCommandResponder):
         request_var_binds = v2c.apiPDU.get_varbinds(pdu)
         non_repeater_count = min(non_repeaters, len(request_var_binds))
         repeater_count = max(len(request_var_binds) - non_repeater_count, 0)
+        if repeater_count:
+            max_repetitions = min(max_repetitions, self.max_varbinds // repeater_count)
         if non_repeater_count == 0 and (max_repetitions == 0 or repeater_count == 0):
             self.send_varbinds(snmp_engine, state_reference, 0, 0, [])
             self.release_state_information(state_reference)
@@ -234,8 +251,9 @@ class SnmpAgent:
             if self._engine is not None:
                 raise RuntimeError("SNMP agent is already running")
             server_socket = bind_udp_socket(self.host, self.port)
-            snmp_engine = engine.SnmpEngine()
+            snmp_engine = None
             try:
+                snmp_engine = engine.SnmpEngine()
                 snmp_engine.message_processing_subsystems.pop(0, None)
                 snmp_engine.security_models.pop(1, None)
                 snmp_engine.message_processing_subsystems[1] = V2cMessageProcessingModel()
@@ -262,12 +280,14 @@ class SnmpAgent:
                 snmp_context = context.SnmpContext(snmp_engine)
                 snmp_context.unregister_context_name(b"")
                 snmp_context.register_context_name(b"", StoreInstrumentation(self.store))
-                V2cGetCommandResponder(snmp_engine, snmp_context)
-                V2cNextCommandResponder(snmp_engine, snmp_context)
-                V2cBulkCommandResponder(snmp_engine, snmp_context)
+                community = encode_octet_string(self.community)
+                V2cGetCommandResponder(snmp_engine, snmp_context, community=community)
+                V2cNextCommandResponder(snmp_engine, snmp_context, community=community)
+                V2cBulkCommandResponder(snmp_engine, snmp_context, community=community)
                 await transport.wait_ready()
             except BaseException:
-                snmp_engine.close_dispatcher()
+                if snmp_engine is not None:
+                    snmp_engine.close_dispatcher()
                 server_socket.close()
                 raise
             self._engine = snmp_engine

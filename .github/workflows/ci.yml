@@ -78,6 +78,19 @@ jobs:
               python -m snmp_emulator --device-config examples/device.json \
               --scenario "examples/$scenario.json" --check-config
           done
+      - name: Audit build system dependencies
+        run: |
+          python - <<'PY'
+          import os
+          import tomllib
+          from pathlib import Path
+
+          project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+          target = Path(os.environ["RUNNER_TEMP"]) / "build-requirements.txt"
+          target.write_text("\n".join(project["build-system"]["requires"]), encoding="utf-8")
+          PY
+          uv run --locked --python "3.13" --all-extras \
+            pip-audit --strict --requirement "$RUNNER_TEMP/build-requirements.txt"
       - name: Build package
         run: uv build --clear
       - name: Validate package metadata
@@ -95,6 +108,7 @@ jobs:
             --config examples/device.yaml --check-config
           "$RUNNER_TEMP/wheel-venv/bin/python" tests/installed_smoke.py
           xvfb-run -a "$RUNNER_TEMP/wheel-venv/bin/python" tests/gui_smoke.py
+          "$RUNNER_TEMP/wheel-venv/bin/python" tests/stability_smoke.py
           python -m venv "$RUNNER_TEMP/sdist-venv"
           "$RUNNER_TEMP/sdist-venv/bin/python" -m pip install \
             --disable-pip-version-check dist/*.tar.gz
@@ -104,6 +118,7 @@ jobs:
             --config examples/device.yaml --check-config
           "$RUNNER_TEMP/sdist-venv/bin/python" tests/installed_smoke.py
           xvfb-run -a "$RUNNER_TEMP/sdist-venv/bin/python" tests/gui_smoke.py
+          "$RUNNER_TEMP/sdist-venv/bin/python" tests/stability_smoke.py
       - name: Verify examples with Net-SNMP
         run: |
           sudo apt-get update -qq
@@ -143,3 +158,4 @@ jobs:
           & "$venv/Scripts/snmp-emulator.exe" --config examples/device.yaml --check-config
           & "$venv/Scripts/python.exe" tests/installed_smoke.py
           & "$venv/Scripts/python.exe" tests/gui_smoke.py
+          & "$venv/Scripts/python.exe" tests/stability_smoke.py
