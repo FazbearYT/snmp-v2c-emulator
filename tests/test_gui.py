@@ -1,6 +1,7 @@
 import gc
 import json
 import os
+import sys
 import time
 from dataclasses import replace
 from pathlib import Path
@@ -273,3 +274,82 @@ def test_local_templates_work_without_running_emulator_and_choices_scroll(window
     console.run_button.invoke()
     assert not console.output.get("1.0", "end").strip()
     assert not console.client.active
+
+
+def test_template_and_oid_selection_restore_entry_focus_after_widget_bindings(window, monkeypatch):
+    root, panel = window
+    panel.open_console()
+    console = panel.console
+    focus_order = []
+    monkeypatch.setattr(console.entry, "focus_set", lambda: focus_order.append("entry"))
+    console.template_buttons["HELP"].invoke()
+    focus_order.append("template")
+    root.update_idletasks()
+    assert focus_order[-1] == "entry"
+    console.command.set("GET ")
+    snapshot = PanelSnapshot(
+        metrics=build_store(load_json_config(*panel.selected_paths())).snapshot()
+    )
+    console.refresh(snapshot, False)
+    console.choices.selection_set(0)
+    console._complete_selected()
+    focus_order.append("suggestion")
+    root.update_idletasks()
+    assert focus_order[-1] == "entry"
+    assert console.command.get().startswith("GET 1.3.")
+
+
+def test_enter_and_keypad_enter_submit_once_from_entry_templates_and_suggestions(
+    window, monkeypatch
+):
+    _, panel = window
+    panel.open_console()
+    console = panel.console
+    calls = []
+    monkeypatch.setattr(console, "execute", lambda: calls.append(console.command.get()))
+    console.command.set("HELP")
+    widgets = (
+        console.entry,
+        console.choices,
+        console.run_button,
+        *console.template_buttons.values(),
+    )
+    for widget in widgets:
+        for sequence in ("<Return>", "<KP_Enter>"):
+            assert widget.bind(sequence)
+    assert console._submit_key(None) == "break"
+    assert calls == ["HELP"]
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="Mapped keyboard test uses the CI virtual display"
+)
+def test_enter_after_template_and_oid_selection_sends_real_query(window):
+    root, panel = window
+    panel.start()
+    pump_until(root, lambda: bool(panel.table.get_children()))
+    panel.open_console()
+    console = panel.console
+    console.window.geometry("1000x700+10000+10000")
+    console.window.deiconify()
+    root.update()
+    console.window.focus_force()
+    console.template_buttons["HELP"].invoke()
+    console.template_buttons["HELP"].focus_set()
+    root.update()
+    assert console.window.focus_get() is console.entry
+    console.entry.event_generate("<Return>")
+    root.update()
+    assert console.output.get("1.0", "end").count("HELP — справка по командам") == 1
+    console.command.set("GET cpu")
+    console.choices.focus_set()
+    console.choices.selection_set(0)
+    console.choices.event_generate("<<ListboxSelect>>")
+    root.update()
+    assert console.window.focus_get() is console.entry
+    console.entry.event_generate("<KP_Enter>")
+    pump_until(root, lambda: not console.client.active)
+    console.refresh(panel.controller.snapshot(), True)
+    output = console.output.get("1.0", "end")
+    assert output.count("Завершено за") == 1
+    assert "Ошибка" not in output
