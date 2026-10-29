@@ -121,10 +121,22 @@ def test_modes_keep_custom_files_independent(window, monkeypatch):
     root.update()
     assert panel.selected_paths() == custom_paths
     assert panel.preset_frame.winfo_manager() == ""
-    monkeypatch.setattr("snmp_emulator.gui.filedialog.askopenfilename", lambda **_: "other.json")
+    dialog_options = []
+
+    def choose_file(**options):
+        dialog_options.append(options)
+        return "other.json"
+
+    monkeypatch.setattr("snmp_emulator.gui.filedialog.askopenfilename", choose_file)
     panel._browse(panel.scenario)
+    assert dialog_options[-1]["initialdir"] == str(panel._examples.resolve())
     assert panel.selected_paths()[1].name == "other.json"
     assert panel.profile.get() == "Скачок температуры"
+    panel._browse(panel.device)
+    assert dialog_options[-1]["initialdir"] == str(custom_paths[0].parent.resolve())
+    panel.device.set(str(custom_paths[0].parent / "missing-folder" / "device.json"))
+    panel._browse(panel.device)
+    assert dialog_options[-1]["initialdir"] == str(panel._examples.resolve())
     monkeypatch.setattr("snmp_emulator.gui.filedialog.askopenfilename", lambda **_: "")
     panel._browse(panel.scenario)
     assert panel.selected_paths()[1].name == "other.json"
