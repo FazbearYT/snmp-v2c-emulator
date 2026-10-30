@@ -73,7 +73,7 @@ def pump_until(root, predicate):
 
 def test_window_controls_real_application(window):
     root, panel = window
-    panel.profile.set("Рост загрузки процессора")
+    panel.profile.set("device · 5 метрик · Рост загрузки процессора")
     assert PROFILES[panel.profile.get()] == ("device.json", "cpu-step.json")
     panel.scenario.set(str(panel._examples / "cpu-step.json"))
     panel.start()
@@ -114,7 +114,7 @@ def test_modes_keep_custom_files_independent(window, monkeypatch):
     root.update()
     assert panel.files_frame.winfo_manager() == ""
     assert panel.preset_frame.winfo_manager() == "grid"
-    panel.profile.set("Скачок температуры")
+    panel.profile.set("device · 5 метрик · Скачок температуры")
     assert panel.selected_paths()[1].name == "temperature-jump.json"
     panel.mode.set("custom")
     panel._change_mode()
@@ -131,7 +131,7 @@ def test_modes_keep_custom_files_independent(window, monkeypatch):
     panel._browse(panel.scenario)
     assert dialog_options[-1]["initialdir"] == str(panel._examples.resolve())
     assert panel.selected_paths()[1].name == "other.json"
-    assert panel.profile.get() == "Скачок температуры"
+    assert panel.profile.get() == "device · 5 метрик · Скачок температуры"
     panel._browse(panel.device)
     assert dialog_options[-1]["initialdir"] == str(custom_paths[0].parent.resolve())
     panel.device.set(str(custom_paths[0].parent / "missing-folder" / "device.json"))
@@ -201,8 +201,8 @@ def test_closing_panel_cancels_pending_console_request(window):
 @pytest.mark.parametrize(
     "profile,count,branch",
     [
-        ("Коммутатор: рост трафика", 7, "2"),
-        ("ИБП: отключение питания", 8, "3"),
+        ("device · 7 метрик · Рост трафика", 7, "2"),
+        ("device · 8 метрик · Рост нагрузки", 8, "3"),
     ],
 )
 def test_device_profiles_populate_table_and_console(window, profile, count, branch):
