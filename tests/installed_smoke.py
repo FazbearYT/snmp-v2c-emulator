@@ -33,13 +33,20 @@ JSON_PROFILES = {
     "stable": ("device.json", {}),
     "temperature-jump": ("device.json", {"temperature": 80}),
     "cpu-step": ("device.json", {"cpu_usage": 90}),
-    "switch-traffic": (
-        "switch-device.json",
+    "traffic-growth": (
+        "device-7.json",
         {"cpu_usage": 70, "inbound_mbps": 600, "outbound_mbps": 440},
     ),
-    "ups-battery": (
-        "ups-device.json",
-        {"battery_charge": 20, "input_voltage": 0, "runtime_minutes": 6, "power_source": "battery"},
+    "load-growth": (
+        "device-8.json",
+        {
+            "cpu_usage": 85,
+            "memory_usage": 70,
+            "temperature": 63,
+            "inbound_mbps": 520,
+            "outbound_mbps": 360,
+            "status": "busy",
+        },
     ),
 }
 JSON_SCENARIOS = tuple(JSON_PROFILES)

@@ -19,13 +19,6 @@ METRIC_LABELS = {
     "active_ports": "Активные порты",
     "inbound_mbps": "Входящий трафик, Мбит/с",
     "outbound_mbps": "Исходящий трафик, Мбит/с",
-    "battery_charge": "Заряд батареи, %",
-    "load_percent": "Нагрузка ИБП, %",
-    "input_voltage": "Входное напряжение, В",
-    "output_voltage": "Выходное напряжение, В",
-    "runtime_minutes": "Запас работы, мин",
-    "battery_temperature": "Температура батареи, °C",
-    "power_source": "Источник питания",
 }
 STATES = {
     "idle": "Готов к запуску",

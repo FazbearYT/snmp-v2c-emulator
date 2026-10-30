@@ -6,52 +6,52 @@
   },
   "metrics": [
     {
-      "name": "battery_charge",
+      "name": "cpu_usage",
       "oid": "1.3.6.1.4.1.55555.3.1.0",
+      "type": "Integer32",
+      "initial": 15
+    },
+    {
+      "name": "memory_usage",
+      "oid": "1.3.6.1.4.1.55555.3.2.0",
+      "type": "Integer32",
+      "initial": 35
+    },
+    {
+      "name": "temperature",
+      "oid": "1.3.6.1.4.1.55555.3.3.0",
+      "type": "Integer32",
+      "initial": 35
+    },
+    {
+      "name": "active_ports",
+      "oid": "1.3.6.1.4.1.55555.3.4.0",
+      "type": "Integer32",
+      "initial": 8
+    },
+    {
+      "name": "inbound_mbps",
+      "oid": "1.3.6.1.4.1.55555.3.5.0",
       "type": "Integer32",
       "initial": 100
     },
     {
-      "name": "load_percent",
-      "oid": "1.3.6.1.4.1.55555.3.2.0",
-      "type": "Integer32",
-      "initial": 45
-    },
-    {
-      "name": "input_voltage",
-      "oid": "1.3.6.1.4.1.55555.3.3.0",
-      "type": "Integer32",
-      "initial": 230
-    },
-    {
-      "name": "output_voltage",
-      "oid": "1.3.6.1.4.1.55555.3.4.0",
-      "type": "Integer32",
-      "initial": 230
-    },
-    {
-      "name": "runtime_minutes",
-      "oid": "1.3.6.1.4.1.55555.3.5.0",
-      "type": "Integer32",
-      "initial": 30
-    },
-    {
-      "name": "battery_temperature",
+      "name": "outbound_mbps",
       "oid": "1.3.6.1.4.1.55555.3.6.0",
       "type": "Integer32",
-      "initial": 27
+      "initial": 80
     },
     {
       "name": "description",
       "oid": "1.3.6.1.4.1.55555.3.7.0",
       "type": "OctetString",
-      "initial": "Demo UPS"
+      "initial": "SNMP demo device"
     },
     {
-      "name": "power_source",
+      "name": "status",
       "oid": "1.3.6.1.4.1.55555.3.8.0",
       "type": "OctetString",
-      "initial": "mains"
+      "initial": "OK"
     }
   ]
 }

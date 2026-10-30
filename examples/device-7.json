@@ -21,7 +21,7 @@
       "name": "description",
       "oid": "1.3.6.1.4.1.55555.2.3.0",
       "type": "OctetString",
-      "initial": "Demo 24-port switch"
+      "initial": "SNMP demo device"
     },
     {
       "name": "port_count",

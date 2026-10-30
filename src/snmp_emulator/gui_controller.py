@@ -13,11 +13,11 @@ from .domain.metric import Metric
 from .json_config import load_json_config
 
 PROFILES = {
-    "Стабильные показатели": ("device.json", "stable.json"),
-    "Скачок температуры": ("device.json", "temperature-jump.json"),
-    "Рост загрузки процессора": ("device.json", "cpu-step.json"),
-    "Коммутатор: рост трафика": ("switch-device.json", "switch-traffic.json"),
-    "ИБП: отключение питания": ("ups-device.json", "ups-battery.json"),
+    "device · 5 метрик · Стабильные показатели": ("device.json", "stable.json"),
+    "device · 5 метрик · Скачок температуры": ("device.json", "temperature-jump.json"),
+    "device · 5 метрик · Рост загрузки процессора": ("device.json", "cpu-step.json"),
+    "device · 7 метрик · Рост трафика": ("device-7.json", "traffic-growth.json"),
+    "device · 8 метрик · Рост нагрузки": ("device-8.json", "load-growth.json"),
 }
 
 
