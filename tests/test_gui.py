@@ -62,8 +62,8 @@ def window(desktop, tmp_path, monkeypatch):
         root.destroy()
 
 
-def pump_until(root, predicate):
-    deadline = time.monotonic() + 5
+def pump_until(root, predicate, timeout=5):
+    deadline = time.monotonic() + timeout
     while not predicate():
         assert time.monotonic() < deadline
         root.update()
@@ -155,8 +155,14 @@ def test_console_templates_completion_requests_and_history(window):
     for operation in ("GET", "GETNEXT", "WALK", "GETBULK"):
         console.template(operation)
         console.execute()
+        assert console.command.get() == ""
         pump_until(root, lambda: not console.client.active)
         console.refresh(panel.controller.snapshot(), True)
+        output = console.output.get("1.0", "end")
+        for _ in range(3):
+            console._submit_key(None)
+        assert console.output.get("1.0", "end") == output
+        assert not console.client.active
     output = console.output.get("1.0", "end")
     assert "Ошибка" not in output
     assert output.count("Завершено за") == 4
@@ -166,6 +172,7 @@ def test_console_templates_completion_requests_and_history(window):
     assert console.command.get().startswith("GETBULK")
     console.command.set("GET missing")
     console.execute()
+    assert console.command.get() == "GET missing"
     assert "Ошибка команды" in console.output.get("1.0", "end")
     console.command.set("HELP")
     console.execute()
@@ -203,6 +210,7 @@ def test_closing_panel_cancels_pending_console_request(window):
     [
         ("device · 7 метрик · Рост трафика", 7, "2"),
         ("device · 8 метрик · Рост нагрузки", 8, "3"),
+        ("device · 6 метрик · Восстановление", 6, "4"),
     ],
 )
 def test_device_profiles_populate_table_and_console(window, profile, count, branch):
@@ -236,6 +244,81 @@ def test_scenario_time_is_separate_from_emulator_uptime(window):
     )
     assert "сценарий: 20.0 / 20 с" in panel.details.get()
     assert "эмулятор работает: 25.6 с" in panel.details.get()
+
+
+def test_clear_input_preserves_output_and_command_history(window):
+    root, panel = window
+    panel.open_console()
+    console = panel.console
+    console.command.set("HELP")
+    console._submit_key(None)
+    assert console.command.get() == ""
+    output = console.output.get("1.0", "end")
+    console._submit_key(None)
+    assert console.output.get("1.0", "end") == output
+    console.command.set("GET unfinished")
+    console.clear_input_button.invoke()
+    root.update_idletasks()
+    assert console.command.get() == ""
+    assert str(console.run_button["state"]) == "disabled"
+    assert console.output.get("1.0", "end") == output
+    console._recall(-1)
+    assert console.command.get() == "HELP"
+    assert console.template_buttons["CLEAR"]["text"] == "CLEAR"
+    console.template_buttons["CLEAR"].invoke()
+    console._submit_key(None)
+    assert console.command.get() == ""
+    assert not console.output.get("1.0", "end").strip()
+
+
+def test_template_tooltips_show_help_and_cancel_on_leave(window, monkeypatch):
+    _, panel = window
+    panel.open_console()
+    console = panel.console
+    monkeypatch.setattr(tk.Toplevel, "deiconify", lambda _: None)
+    assert set(console.template_tooltips) == set(console.template_buttons)
+    for tooltip in console.template_tooltips.values():
+        tooltip._schedule(None)
+        assert tooltip.pending is not None
+        tooltip.hide()
+        assert tooltip.pending is None
+        tooltip.show()
+        assert tooltip.window is not None
+        assert tooltip.window.winfo_children()[0]["text"] == tooltip.text
+        tooltip.hide()
+        assert tooltip.window is None
+    assert "историю ввода" in console.template_tooltips["CLEAR"].text
+    assert not console.clear_input_button.bind("<Enter>")
+
+
+def test_recovery_panel_completes_and_restarts_from_emergency_values(window):
+    root, panel = window
+    panel.mode.set("preset")
+    panel.profile.set("device · 6 метрик · Восстановление")
+    device_path, scenario_path = panel.selected_paths()
+    document = json.loads(device_path.read_text(encoding="utf-8"))
+    document["agent"]["port"] = reserve_udp_port()
+    custom_device = Path(panel.device.get())
+    custom_device.write_text(json.dumps(document), encoding="utf-8")
+    panel.mode.set("custom")
+    panel.scenario.set(str(scenario_path))
+    initial = {m["name"]: m["initial"] for m in document["metrics"]}
+    for completed in (True, False):
+        panel.start()
+        pump_until(root, lambda: panel.controller.snapshot().state == "running")
+        assert {m.name: m.value for m in panel.controller.snapshot().metrics} == initial
+        if completed:
+            pump_until(root, lambda: panel.controller.snapshot().state == "completed", timeout=15)
+            values = {m.name: m.value for m in panel.controller.snapshot().metrics}
+            assert values == {
+                **initial,
+                "cpu_usage": 15,
+                "temperature": 35,
+                "interface_status": "up",
+            }
+            assert panel.table.set("interface_status", "value") == "up"
+        panel.stop()
+        pump_until(root, lambda: not panel.controller.active)
 
 
 def test_console_marks_each_run_and_retains_previous_output(window):

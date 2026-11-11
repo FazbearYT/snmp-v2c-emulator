@@ -30,6 +30,10 @@ from snmp_emulator.domain.types import SnmpDataType
 from snmp_emulator.json_config import load_json_config
 
 JSON_PROFILES = {
+    "recovery": (
+        "device-emergency.json",
+        {"cpu_usage": 15, "temperature": 35, "interface_status": "up"},
+    ),
     "stable": ("device.json", {}),
     "temperature-jump": ("device.json", {"temperature": 80}),
     "cpu-step": ("device.json", {"cpu_usage": 90}),

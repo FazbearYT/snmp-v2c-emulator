@@ -17,6 +17,46 @@ from .snmp_console import (
 )
 
 
+class TemplateTooltip:
+    def __init__(self, button: ttk.Button, text: str) -> None:
+        self.button = button
+        self.text = text
+        self.pending: str | None = None
+        self.window: tk.Toplevel | None = None
+        button.bind("<Enter>", self._schedule, add=True)
+        for event in ("<Leave>", "<ButtonPress>", "<Destroy>"):
+            button.bind(event, self.hide, add=True)
+
+    def _schedule(self, _event: tk.Event) -> None:
+        self.hide()
+        self.pending = self.button.after(500, self.show)
+
+    def show(self) -> None:
+        self.pending = None
+        self.window = tk.Toplevel(self.button)
+        self.window.withdraw()
+        self.window.overrideredirect(True)
+        ttk.Label(self.window, text=self.text, padding=8, wraplength=360).pack()
+        self.window.update_idletasks()
+        x = min(
+            self.button.winfo_rootx(),
+            self.button.winfo_screenwidth() - self.window.winfo_reqwidth(),
+        )
+        y = self.button.winfo_rooty() + self.button.winfo_height() + 6
+        if y + self.window.winfo_reqheight() > self.button.winfo_screenheight():
+            y = self.button.winfo_rooty() - self.window.winfo_reqheight() - 6
+        self.window.geometry(f"+{max(0, x)}+{max(0, y)}")
+        self.window.deiconify()
+
+    def hide(self, _event: tk.Event | None = None) -> None:
+        if self.pending is not None:
+            self.button.after_cancel(self.pending)
+            self.pending = None
+        if self.window is not None:
+            self.window.destroy()
+            self.window = None
+
+
 class SnmpConsoleWindow:
     def __init__(self, parent: tk.Misc) -> None:
         self.window = tk.Toplevel(parent)
@@ -42,7 +82,7 @@ class SnmpConsoleWindow:
         self._append(
             "Консоль выполняет реальные SNMP v2c-запросы по UDP.\n"
             "Шаблон подставляет команду; Enter или «Выполнить» отправляет запрос.\n"
-            "Tab — первая подсказка, ↑/↓ — история. HELP — справка, CLEAR — очистка.\n"
+            "Tab — первая подсказка, ↑/↓ — история. HELP — справка, CLEAR — очистка вывода.\n"
         )
 
     def _build(self) -> None:
@@ -55,12 +95,16 @@ class SnmpConsoleWindow:
         templates = ttk.Frame(frame)
         templates.pack(fill="x")
         self.template_buttons = {}
+        self.template_tooltips = {}
         for operation in COMMAND_HELP:
             button = ttk.Button(
-                templates, text=operation, command=lambda op=operation: self.template(op)
+                templates,
+                text=operation,
+                command=lambda op=operation: self.template(op),
             )
             button.pack(side="left", padx=(0, 8))
             self.template_buttons[operation] = button
+            self.template_tooltips[operation] = TemplateTooltip(button, COMMAND_HELP[operation])
         ttk.Label(frame, textvariable=self.hint, wraplength=900).pack(anchor="w", pady=(10, 6))
         command_row = ttk.Frame(frame)
         command_row.pack(fill="x")
@@ -69,6 +113,10 @@ class SnmpConsoleWindow:
         self.entry.bind("<Tab>", self._complete_first)
         self.entry.bind("<Up>", lambda _: self._recall(-1))
         self.entry.bind("<Down>", lambda _: self._recall(1))
+        self.clear_input_button = ttk.Button(
+            command_row, text="×", width=3, command=self._clear_input, takefocus=True
+        )
+        self.clear_input_button.pack(side="left", padx=(4, 0))
         self.run_button = ttk.Button(
             command_row, text="Выполнить", command=self.execute, state="disabled"
         )
@@ -124,6 +172,15 @@ class SnmpConsoleWindow:
         self.entry.focus_set()
         self.window.after_idle(self.entry.focus_set)
 
+    def _clear_input(self) -> None:
+        self.command.set("")
+        self._history_index = len(self._history)
+        self._focus_command_entry()
+
+    def _remember_command(self, text: str) -> None:
+        self._history.append(text)
+        self._clear_input()
+
     def _append(self, text: str) -> None:
         self.output.configure(state="normal")
         self.output.insert("end", text + "\n")
@@ -139,6 +196,8 @@ class SnmpConsoleWindow:
 
     def hide(self) -> None:
         self.client.cancel()
+        for tooltip in self.template_tooltips.values():
+            tooltip.hide()
         self.window.withdraw()
 
     def refresh(self, snapshot: PanelSnapshot, ready: bool) -> None:
@@ -176,7 +235,9 @@ class SnmpConsoleWindow:
 
     def _update_run_button(self) -> None:
         local = self.command.get().strip().upper() in LOCAL_COMMANDS
-        enabled = local or (self.ready and not self.client.active)
+        enabled = bool(self.command.get().strip()) and (
+            local or (self.ready and not self.client.active)
+        )
         self.run_button.configure(state="normal" if enabled else "disabled")
 
     def _drain_output(self) -> None:
@@ -249,13 +310,17 @@ class SnmpConsoleWindow:
 
     def execute(self) -> None:
         text = self.command.get().strip()
+        if not text:
+            return
         if text.upper() == "HELP":
             self.help()
+            self._remember_command(text)
             return
         if text.upper() == "CLEAR":
             self.output.configure(state="normal")
             self.output.delete("1.0", "end")
             self.output.configure(state="disabled")
+            self._remember_command(text)
             return
         if not self.ready:
             self._append("Сначала запустите эмулятор в главном окне.")
@@ -270,6 +335,5 @@ class SnmpConsoleWindow:
             return
         host, port = self.snapshot.address.rsplit(":", 1)
         if self.client.start(request, host, int(port), self.snapshot.community):
-            self._history.append(text)
-            self._history_index = len(self._history)
+            self._remember_command(text)
             self.run_button.configure(state="disabled")

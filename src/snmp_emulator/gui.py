@@ -19,6 +19,8 @@ METRIC_LABELS = {
     "active_ports": "Активные порты",
     "inbound_mbps": "Входящий трафик, Мбит/с",
     "outbound_mbps": "Исходящий трафик, Мбит/с",
+    "interface_status": "Состояние интерфейса",
+    "interface_errors": "Ошибки интерфейса",
 }
 STATES = {
     "idle": "Готов к запуску",

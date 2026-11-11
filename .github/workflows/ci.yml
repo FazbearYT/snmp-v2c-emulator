@@ -78,6 +78,12 @@ jobs:
               python -m snmp_emulator --device-config examples/device.json \
               --scenario "examples/$scenario.json" --check-config
           done
+          uv run --locked --python "3.13" --all-extras \
+            python -m snmp_emulator --device-config examples/device-emergency.json \
+            --scenario examples/recovery.json --check-config
+          uv run --locked --python "3.13" --all-extras \
+            python -m snmp_emulator --device-config examples/device-normal.json \
+            --scenario examples/recovery.json --check-config
       - name: Audit build system dependencies
         run: |
           python - <<'PY'
