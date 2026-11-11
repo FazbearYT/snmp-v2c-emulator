@@ -18,6 +18,7 @@ PROFILES = {
     "device · 5 метрик · Рост загрузки процессора": ("device.json", "cpu-step.json"),
     "device · 7 метрик · Рост трафика": ("device-7.json", "traffic-growth.json"),
     "device · 8 метрик · Рост нагрузки": ("device-8.json", "load-growth.json"),
+    "device · 6 метрик · Восстановление": ("device-emergency.json", "recovery.json"),
 }
 
 

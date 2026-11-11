@@ -1,14 +1,16 @@
 import asyncio
 from dataclasses import dataclass
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 
 from snmp_emulator.application import EmulatorApplication, build_store
-from snmp_emulator.json_config import DeviceConfig, ScenarioDocument, bind_config
+from snmp_emulator.json_config import DeviceConfig, ScenarioDocument, bind_config, load_json_config
 from snmp_emulator.scenarios.engine import ScenarioEngine, build_scenarios
 
 OID = "1.3.6.1.4.1.55555.1.0"
+EXAMPLES = Path(__file__).parents[1] / "examples"
 
 
 @dataclass
@@ -17,6 +19,58 @@ class ManualClock:
 
     def now(self) -> Decimal:
         return self.value
+
+
+def test_recovery_starts_independently_and_preserves_accumulated_errors() -> None:
+    config = load_json_config(EXAMPLES / "device-emergency.json", EXAMPLES / "recovery.json")
+    normal = DeviceConfig.model_validate_json((EXAMPLES / "device-normal.json").read_text())
+    assert [(m.name, m.oid, m.type) for m in config.metrics] == [
+        (m.name, m.oid, m.type) for m in normal.metrics
+    ]
+    assert config.agent == normal.agent
+    initial = {m.name: m.initial for m in config.metrics}
+    assert initial == {
+        "cpu_usage": 95,
+        "temperature": 80,
+        "description": "SNMP demo device",
+        "memory_usage": 40,
+        "interface_status": "down",
+        "interface_errors": 120,
+    }
+    expected_final = {m.name: m.initial for m in normal.metrics}
+    expected_final["interface_errors"] = 120
+    for _ in range(2):
+        application = EmulatorApplication(config)
+        clock = ManualClock()
+        scenario = ScenarioEngine(
+            application.store,
+            build_scenarios(config.scenarios),
+            clock,
+            tick_interval=config.update_interval,
+            duration=config.duration,
+        )
+        scenario.start()
+        for timestamp, cpu, temperature, status in (
+            ("0", 95, 80, "down"),
+            ("0.999", 95, 80, "down"),
+            ("1", 85, 75, "down"),
+            ("8", 15, 40, "down"),
+            ("9", 15, 35, "down"),
+            ("10", 15, 35, "up"),
+            ("12", 15, 35, "up"),
+            ("100", 15, 35, "up"),
+        ):
+            clock.value = Decimal(timestamp)
+            scenario.tick()
+            values = {m.name: m.value for m in application.store.snapshot()}
+            assert values == {
+                **initial,
+                "cpu_usage": cpu,
+                "temperature": temperature,
+                "interface_status": status,
+            }
+        assert values == expected_final
+    assert {m.name: m.initial for m in config.metrics} == initial
 
 
 def configuration(rule: dict, duration: float = 1, interval: float = 0.1):
