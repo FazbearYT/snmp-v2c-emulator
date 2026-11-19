@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 
 from .adapters.pysnmp_agent import SnmpAgent
 from .config import EmulatorConfig
@@ -8,6 +9,8 @@ from .domain.metric import Metric
 from .domain.oid import ObjectIdentifier
 from .domain.store import MetricStore
 from .scenarios.engine import ScenarioEngine, build_scenarios
+
+LOGGER = logging.getLogger(__name__)
 
 
 def build_store(config: EmulatorConfig) -> MetricStore:
@@ -48,12 +51,16 @@ class EmulatorApplication:
         try:
             await self.agent.start()
             self.started.set()
+            LOGGER.info("listening on udp://%s:%d", self.config.agent.host, self.config.agent.port)
             async with asyncio.TaskGroup() as tasks:
                 tasks.create_task(self.scenario_engine.run())
                 tasks.create_task(asyncio.Event().wait())
         finally:
+            was_started = self.started.is_set()
             self.started.clear()
             try:
                 await self.agent.stop()
+                if was_started:
+                    LOGGER.info("emulator stopped")
             finally:
                 self._running = False

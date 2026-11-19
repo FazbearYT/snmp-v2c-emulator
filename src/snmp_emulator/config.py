@@ -15,7 +15,7 @@ from pydantic import (
     model_validator,
 )
 from yaml.constructor import ConstructorError
-from yaml.nodes import MappingNode
+from yaml.nodes import MappingNode, Node, ScalarNode
 
 from .domain.oid import ObjectIdentifier
 from .domain.types import SnmpDataType, encode_octet_string, validate_snmp_value
@@ -24,6 +24,17 @@ NonEmptyName = Annotated[str, StringConstraints(strip_whitespace=True, min_lengt
 
 
 class UniqueKeySafeLoader(yaml.SafeLoader):
+    def construct_object(self, node: Node, deep: bool = False) -> Any:
+        try:
+            return super().construct_object(node, deep=deep)
+        except (AttributeError, IndexError, KeyError, ValueError) as exc:
+            if not isinstance(node, ScalarNode):
+                raise
+            tag = node.tag.rsplit(":", 1)[-1]
+            raise ConstructorError(
+                None, None, f"invalid value for YAML tag {tag!r}", node.start_mark
+            ) from exc
+
     def construct_mapping(self, node: MappingNode, deep: bool = False) -> dict[Any, Any]:
         self.flatten_mapping(node)
         mapping: dict[Any, Any] = {}
@@ -273,10 +284,8 @@ class ConfigurationError(ValueError):
 def load_config(path: str | Path) -> EmulatorConfig:
     source = Path(path)
     try:
-        document = yaml.load(
-            source.read_text(encoding="utf-8"),
-            Loader=UniqueKeySafeLoader,
-        )
+        with source.open(encoding="utf-8") as stream:
+            document = yaml.load(stream, Loader=UniqueKeySafeLoader)
         return EmulatorConfig.model_validate(document)
     except OSError as exc:
         raise ConfigurationError(f"cannot read {source}: {exc}") from exc

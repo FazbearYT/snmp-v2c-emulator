@@ -316,7 +316,6 @@ class SnmpAgent:
                 raise
             self._engine = snmp_engine
             self._transport = transport
-            LOGGER.info("listening on udp://%s:%d", self.host, self.port)
 
     async def stop(self) -> None:
         async with self._lifecycle_lock:

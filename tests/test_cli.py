@@ -56,7 +56,7 @@ def test_requires_unambiguous_configuration_arguments(args, capsys) -> None:
     assert "error:" in capsys.readouterr().err
 
 
-def test_invalid_json_pair_is_rejected_before_application(monkeypatch, tmp_path, capsys) -> None:
+def test_invalid_json_pair_is_rejected_before_application(monkeypatch, tmp_path, caplog) -> None:
     def unexpected_application(config):
         pytest.fail("invalid pair must not create application")
 
@@ -64,9 +64,8 @@ def test_invalid_json_pair_is_rejected_before_application(monkeypatch, tmp_path,
     path = tmp_path / "bad.json"
     path.write_text('{"duration":1,"update_interval":1,"rules":[]}', encoding="utf-8")
     assert cli.main(["--device-config", str(JSON_DEVICE), "--scenario", str(path)]) == 2
-    captured = capsys.readouterr()
-    assert "configuration error:" in captured.err
-    assert "Traceback" not in captured.err
+    assert "configuration error:" in caplog.text
+    assert "Traceback" not in caplog.text
 
 
 def test_runs_json_application(monkeypatch) -> None:
@@ -113,18 +112,20 @@ def test_checks_configuration(capsys: pytest.CaptureFixture[str]) -> None:
 def test_reports_configuration_error(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     result = cli.main(["--config", str(tmp_path / "missing.yaml"), "--check-config"])
 
     assert result == 2
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert "configuration error: cannot read" in captured.err
+    assert "configuration error: cannot read" in caplog.text
 
 
 def test_reports_non_utf8_configuration_as_cli_error(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     config_path = tmp_path / "invalid-encoding.yaml"
     config_path.write_bytes(b"\xff")
@@ -134,7 +135,7 @@ def test_reports_non_utf8_configuration_as_cli_error(
     captured = capsys.readouterr()
     assert result == 2
     assert captured.out == ""
-    assert "cannot decode" in captured.err
+    assert "cannot decode" in caplog.text
 
 
 def test_runs_application(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -245,10 +246,10 @@ async def test_sigterm_requests_graceful_application_stop() -> None:
     assert loop.removed == signal.SIGTERM
 
 
-def test_cli_rejects_deep_yaml_without_traceback(tmp_path, capsys):
+def test_cli_rejects_deep_yaml_without_traceback(tmp_path, caplog):
     path = tmp_path / "deep.yaml"
     path.write_text("[" * 1200 + "0" + "]" * 1200, encoding="utf-8")
     assert cli.main(["--config", str(path), "--check-config"]) == 2
-    error = capsys.readouterr().err
+    error = caplog.text
     assert "invalid YAML" in error
     assert "Traceback" not in error

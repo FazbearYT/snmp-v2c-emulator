@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import sysconfig
 import threading
 import time
@@ -9,8 +10,11 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from .application import EmulatorApplication
+from .config import ConfigurationError
 from .domain.metric import Metric
 from .json_config import load_json_config
+
+LOGGER = logging.getLogger(__name__)
 
 PROFILES = {
     "device · 5 метрик · Стабильные показатели": ("device.json", "stable.json"),
@@ -83,7 +87,14 @@ class PanelController:
             config = load_json_config(device, scenario)
             if not self._stop.is_set():
                 asyncio.run(self._observe(EmulatorApplication(config)))
+        except ConfigurationError as exc:
+            LOGGER.error("configuration error: %s", exc)
+            self._publish(state="error", error=str(exc))
+        except OSError as exc:
+            LOGGER.error("emulator failed: %s", exc)
+            self._publish(state="error", error=str(exc))
         except Exception as exc:
+            LOGGER.exception("emulator stopped unexpectedly")
             self._publish(state="error", error=str(exc))
         else:
             self._publish(state="stopped")
