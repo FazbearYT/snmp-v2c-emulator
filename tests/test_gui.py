@@ -1,0 +1,461 @@
+import gc
+import json
+import os
+import sys
+import time
+from dataclasses import replace
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+from installed_smoke import reserve_udp_port
+
+tk = pytest.importorskip("tkinter")
+
+from snmp_emulator.application import build_store  # noqa: E402
+from snmp_emulator.gui import PROFILES, EmulatorPanel  # noqa: E402
+from snmp_emulator.gui_controller import PanelSnapshot  # noqa: E402
+from snmp_emulator.json_config import load_json_config  # noqa: E402
+
+
+@pytest.fixture(scope="module")
+def desktop():
+    gc.collect()
+    try:
+        root = tk.Tk()
+    except tk.TclError as exc:
+        if os.environ.get("SNMP_GUI_REQUIRED") == "1":
+            raise
+        pytest.skip(f"Graphical session required: {exc}")
+    root.withdraw()
+    yield root
+    root.destroy()
+
+
+@pytest.fixture
+def window(desktop, tmp_path, monkeypatch):
+    gc.collect()
+    root = tk.Toplevel(desktop)
+    root.withdraw()
+    monkeypatch.setattr("snmp_emulator.gui_console.SnmpConsoleWindow.show", lambda _: None)
+    panel = EmulatorPanel(root)
+    document = json.loads((Path(__file__).parents[1] / "examples" / "device.json").read_text())
+    document["agent"]["port"] = reserve_udp_port()
+    device = tmp_path / "device.json"
+    device.write_text(json.dumps(document), encoding="utf-8")
+    panel.device.set(str(device))
+    panel.mode.set("custom")
+    panel._change_mode()
+    yield root, panel
+    panel.controller.stop()
+    if panel.console is not None:
+        panel.console.client.cancel()
+    deadline = time.monotonic() + 5
+    while (
+        panel.controller.active or (panel.console is not None and panel.console.client.active)
+    ) and time.monotonic() < deadline:
+        root.update()
+        time.sleep(0.01)
+    assert not panel.controller.active
+    assert panel.console is None or not panel.console.client.active
+    if root.winfo_exists():
+        root.destroy()
+
+
+def pump_until(root, predicate, timeout=5):
+    deadline = time.monotonic() + timeout
+    while not predicate():
+        assert time.monotonic() < deadline
+        root.update()
+        time.sleep(0.01)
+    root.update()
+
+
+def test_window_controls_real_application(window):
+    root, panel = window
+    panel.profile.set("device · 5 метрик · Рост загрузки процессора")
+    assert PROFILES[panel.profile.get()] == ("device.json", "cpu-step.json")
+    panel.scenario.set(str(panel._examples / "cpu-step.json"))
+    panel.start()
+    panel.start()
+    pump_until(root, lambda: bool(panel.table.get_children()))
+    assert len(panel.table.get_children()) == 5
+    assert str(panel.start_button["state"]) == "disabled"
+    assert "UDP" in panel.details.get()
+    pump_until(root, lambda: len(panel._history) > 1)
+    assert panel.chart.find_all()
+    panel.stop()
+    pump_until(root, lambda: not panel.controller.active)
+    panel.start()
+    pump_until(root, lambda: panel.controller.snapshot().state == "running")
+    panel.close()
+    pump_until(root, lambda: not panel.controller.active)
+
+
+def test_window_reports_file_error_and_keeps_responsive(window):
+    root, panel = window
+    device_path = panel.device.get()
+    panel.device.set("missing-device.json")
+    panel.start()
+    pump_until(root, lambda: bool(panel.error.get()))
+    assert "missing-device.json" in panel.error.get()
+    assert str(panel.start_button["state"]) == "normal"
+    panel.device.set(device_path)
+    panel.start()
+    pump_until(root, lambda: bool(panel.table.get_children()))
+    assert not panel.error.get()
+
+
+def test_modes_keep_custom_files_independent(window, monkeypatch):
+    root, panel = window
+    custom_paths = panel.selected_paths()
+    panel.mode.set("preset")
+    panel._change_mode()
+    root.update()
+    assert panel.files_frame.winfo_manager() == ""
+    assert panel.preset_frame.winfo_manager() == "grid"
+    panel.profile.set("device · 5 метрик · Скачок температуры")
+    assert panel.selected_paths()[1].name == "temperature-jump.json"
+    panel.mode.set("custom")
+    panel._change_mode()
+    root.update()
+    assert panel.selected_paths() == custom_paths
+    assert panel.preset_frame.winfo_manager() == ""
+    dialog_options = []
+
+    def choose_file(**options):
+        dialog_options.append(options)
+        return "other.json"
+
+    monkeypatch.setattr("snmp_emulator.gui.filedialog.askopenfilename", choose_file)
+    panel._browse(panel.scenario)
+    assert dialog_options[-1]["initialdir"] == str(panel._examples.resolve())
+    assert panel.selected_paths()[1].name == "other.json"
+    assert panel.profile.get() == "device · 5 метрик · Скачок температуры"
+    panel._browse(panel.device)
+    assert dialog_options[-1]["initialdir"] == str(custom_paths[0].parent.resolve())
+    panel.device.set(str(custom_paths[0].parent / "missing-folder" / "device.json"))
+    panel._browse(panel.device)
+    assert dialog_options[-1]["initialdir"] == str(panel._examples.resolve())
+    monkeypatch.setattr("snmp_emulator.gui.filedialog.askopenfilename", lambda **_: "")
+    panel._browse(panel.scenario)
+    assert panel.selected_paths()[1].name == "other.json"
+
+
+def test_console_templates_completion_requests_and_history(window):
+    root, panel = window
+    panel.start()
+    pump_until(root, lambda: bool(panel.table.get_children()))
+    panel.open_console()
+    console = panel.console
+    console.command.set("GET cpu")
+    assert "cpu_usage" in console.choices.get(0)
+    console._complete_first()
+    assert console.command.get() == "GET 1.3.6.1.4.1.55555.1.1.0"
+    for operation in ("GET", "GETNEXT", "WALK", "GETBULK"):
+        console.template(operation)
+        console.execute()
+        assert console.command.get() == ""
+        pump_until(root, lambda: not console.client.active)
+        console.refresh(panel.controller.snapshot(), True)
+        output = console.output.get("1.0", "end")
+        for _ in range(3):
+            console._submit_key(None)
+        assert console.output.get("1.0", "end") == output
+        assert not console.client.active
+    output = console.output.get("1.0", "end")
+    assert "Ошибка" not in output
+    assert output.count("Завершено за") == 4
+    assert "OctetString" in output
+    assert "Конец ветки" in output
+    console._recall(-1)
+    assert console.command.get().startswith("GETBULK")
+    console.command.set("GET missing")
+    console.execute()
+    assert console.command.get() == "GET missing"
+    assert "Ошибка команды" in console.output.get("1.0", "end")
+    console.command.set("HELP")
+    console.execute()
+    assert "non-repeaters=0" in console.output.get("1.0", "end")
+    console.command.set("CLEAR")
+    console.execute()
+    assert not console.output.get("1.0", "end").strip()
+    panel.stop()
+    console.command.set("GET cpu_usage")
+    console.execute()
+    assert "Сначала запустите" in console.output.get("1.0", "end")
+    panel.close()
+    pump_until(root, lambda: not panel.controller.active and not console.client.active)
+
+
+def test_closing_panel_cancels_pending_console_request(window):
+    root, panel = window
+    panel.start()
+    pump_until(root, lambda: bool(panel.table.get_children()))
+    panel.open_console()
+    console = panel.console
+    console.refresh(
+        replace(panel.controller.snapshot(), address=f"127.0.0.1:{reserve_udp_port()}"), True
+    )
+    console.command.set("GET cpu_usage")
+    console.execute()
+    assert console.client.active
+    console.hide()
+    panel.close()
+    pump_until(root, lambda: not panel.controller.active and not console.client.active)
+
+
+@pytest.mark.parametrize(
+    "profile,count,branch",
+    [
+        ("device · 7 метрик · Рост трафика", 7, "2"),
+        ("device · 8 метрик · Рост нагрузки", 8, "3"),
+        ("device · 6 метрик · Восстановление", 6, "4"),
+    ],
+)
+def test_device_profiles_populate_table_and_console(window, profile, count, branch):
+    root, panel = window
+    custom_device = Path(panel.device.get())
+    panel.mode.set("preset")
+    panel.profile.set(profile)
+    device_path, scenario_path = panel.selected_paths()
+    document = json.loads(device_path.read_text(encoding="utf-8"))
+    assert 5 <= len(document["metrics"]) <= 10
+    document["agent"]["port"] = reserve_udp_port()
+    custom_device.write_text(json.dumps(document), encoding="utf-8")
+    panel.mode.set("custom")
+    panel.scenario.set(str(scenario_path))
+    panel.start()
+    pump_until(root, lambda: len(panel.table.get_children()) == count)
+    panel.open_console()
+    panel.console.command.set("GET ")
+    suggestions = panel.console.choices.get(0, "end")
+    assert len(suggestions) == count
+    assert all(f"1.3.6.1.4.1.55555.{branch}." in item for item in suggestions)
+    assert set(panel.table.get_children()) == {item["name"] for item in document["metrics"]}
+
+
+def test_scenario_time_is_separate_from_emulator_uptime(window):
+    _, panel = window
+    device, scenario = panel.selected_paths()
+    metrics = build_store(load_json_config(device, scenario)).snapshot()
+    panel._show_metrics(
+        PanelSnapshot(metrics=metrics, elapsed=25.6, duration=20, state="completed")
+    )
+    assert "сценарий: 20.0 / 20 с" in panel.details.get()
+    assert "эмулятор работает: 25.6 с" in panel.details.get()
+
+
+def test_clear_input_preserves_output_and_command_history(window):
+    root, panel = window
+    panel.open_console()
+    console = panel.console
+    console.command.set("HELP")
+    console._submit_key(None)
+    assert console.command.get() == ""
+    output = console.output.get("1.0", "end")
+    console._submit_key(None)
+    assert console.output.get("1.0", "end") == output
+    console.command.set("GET unfinished")
+    console.clear_input_button.invoke()
+    root.update_idletasks()
+    assert console.command.get() == ""
+    assert str(console.run_button["state"]) == "disabled"
+    assert console.output.get("1.0", "end") == output
+    console._recall(-1)
+    assert console.command.get() == "HELP"
+    assert console.template_buttons["CLEAR"]["text"] == "CLEAR"
+    console.template_buttons["CLEAR"].invoke()
+    console._submit_key(None)
+    assert console.command.get() == ""
+    assert not console.output.get("1.0", "end").strip()
+
+
+def test_template_tooltips_show_help_and_cancel_on_leave(window, monkeypatch):
+    _, panel = window
+    panel.open_console()
+    console = panel.console
+    monkeypatch.setattr(tk.Toplevel, "deiconify", lambda _: None)
+    assert set(console.template_tooltips) == set(console.template_buttons)
+    for tooltip in console.template_tooltips.values():
+        tooltip._schedule(None)
+        assert tooltip.pending is not None
+        tooltip.hide()
+        assert tooltip.pending is None
+        tooltip.show()
+        assert tooltip.window is not None
+        (canvas,) = tooltip.window.winfo_children()
+        (label,) = canvas.winfo_children()
+        assert label["text"] == tooltip.text
+        tooltip.hide()
+        assert tooltip.window is None
+    assert "историю ввода" in console.template_tooltips["CLEAR"].text
+    assert not console.clear_input_button.bind("<Enter>")
+
+
+def test_recovery_panel_completes_and_restarts_from_emergency_values(window):
+    root, panel = window
+    panel.mode.set("preset")
+    panel.profile.set("device · 6 метрик · Восстановление")
+    device_path, scenario_path = panel.selected_paths()
+    document = json.loads(device_path.read_text(encoding="utf-8"))
+    document["agent"]["port"] = reserve_udp_port()
+    custom_device = Path(panel.device.get())
+    custom_device.write_text(json.dumps(document), encoding="utf-8")
+    panel.mode.set("custom")
+    panel.scenario.set(str(scenario_path))
+    initial = {m["name"]: m["initial"] for m in document["metrics"]}
+    for completed in (True, False):
+        panel.start()
+        pump_until(root, lambda: panel.controller.snapshot().state == "running")
+        assert {m.name: m.value for m in panel.controller.snapshot().metrics} == initial
+        if completed:
+            pump_until(root, lambda: panel.controller.snapshot().state == "completed", timeout=15)
+            values = {m.name: m.value for m in panel.controller.snapshot().metrics}
+            assert values == {
+                **initial,
+                "cpu_usage": 15,
+                "temperature": 35,
+                "interface_status": "up",
+            }
+            assert panel.table.set("interface_status", "value") == "up"
+        panel.stop()
+        pump_until(root, lambda: not panel.controller.active)
+
+
+def test_console_marks_each_run_and_retains_previous_output(window):
+    root, panel = window
+    panel.start()
+    pump_until(root, lambda: bool(panel.table.get_children()))
+    panel.open_console()
+    console = panel.console
+    assert "Сеанс 1" in console.output.get("1.0", "end")
+    console._append("Ответ предыдущего запуска")
+    before = console.output.get("1.0", "end")
+    console.refresh(panel.controller.snapshot(), True)
+    assert console.output.get("1.0", "end") == before
+    panel.stop()
+    pump_until(root, lambda: not panel.controller.active)
+    console.refresh(panel.controller.snapshot(), False)
+    assert "Эмулятор остановлен" in console.output.get("1.0", "end")
+    panel.start()
+    pump_until(root, lambda: panel.controller.snapshot().state == "running")
+    console.refresh(panel.controller.snapshot(), True)
+    output = console.output.get("1.0", "end")
+    assert output.index("Ответ предыдущего запуска") < output.index("Сеанс 2")
+    assert output.count("Сеанс 2") == 1
+    assert "device.json" in output
+    assert "Сеанс 2" in console.target.get()
+
+
+def test_local_templates_work_without_running_emulator_and_choices_scroll(window):
+    root, panel = window
+    panel.open_console()
+    console = panel.console
+    assert set(console.template_buttons) == {"GET", "GETNEXT", "WALK", "GETBULK", "HELP", "CLEAR"}
+    assert console.choices.size() == 6
+    root.update_idletasks()
+    console.choices.yview_moveto(0)
+    assert console._scroll_choices(SimpleNamespace(delta=-120)) == "break"
+    assert console.choices.yview()[0] > 0
+    console._scroll_choices(SimpleNamespace(delta=120))
+    assert console.choices.yview()[0] == 0
+    assert console.choices_scrollbar.winfo_manager() == "pack"
+    console.template_buttons["HELP"].invoke()
+    assert console.command.get() == "HELP"
+    assert str(console.run_button["state"]) == "normal"
+    console.run_button.invoke()
+    assert "CLEAR —" in console.output.get("1.0", "end")
+    console.template_buttons["CLEAR"].invoke()
+    assert console.command.get() == "CLEAR"
+    console.run_button.invoke()
+    assert not console.output.get("1.0", "end").strip()
+    assert not console.client.active
+
+
+def test_template_and_oid_selection_restore_entry_focus_after_widget_bindings(window, monkeypatch):
+    root, panel = window
+    panel.open_console()
+    console = panel.console
+    focus_order = []
+    monkeypatch.setattr(console.entry, "focus_set", lambda: focus_order.append("entry"))
+    console.template_buttons["HELP"].invoke()
+    focus_order.append("template")
+    root.update_idletasks()
+    assert focus_order[-1] == "entry"
+    console.command.set("GET ")
+    snapshot = PanelSnapshot(
+        metrics=build_store(load_json_config(*panel.selected_paths())).snapshot()
+    )
+    console.refresh(snapshot, False)
+    console.choices.selection_set(0)
+    console._complete_selected()
+    focus_order.append("suggestion")
+    root.update_idletasks()
+    assert focus_order[-1] == "entry"
+    assert console.command.get().startswith("GET 1.3.")
+
+
+def test_enter_and_keypad_enter_submit_once_from_entry_templates_and_suggestions(window):
+    _, panel = window
+    panel.open_console()
+    console = panel.console
+    widgets = (
+        console.entry,
+        console.choices,
+        console.run_button,
+        *console.template_buttons.values(),
+    )
+    for widget in widgets:
+        for sequence in ("<Return>", "<KP_Enter>"):
+            assert widget.bind(sequence)
+
+    console.command.set("GET cpu_usage")
+    output = console.output.get("1.0", "end-1c")
+    inactive_agent_message = "Сначала запустите эмулятор в главном окне.\n"
+    assert console.run_button.instate(("!disabled",))
+    assert console._submit_key(None) == "break"
+    assert console.command.get() == "GET cpu_usage"
+    assert console.output.get("1.0", "end-1c") == output + inactive_agent_message
+    console.run_button.invoke()
+    assert console.command.get() == "GET cpu_usage"
+    assert console.output.get("1.0", "end-1c") == output + 2 * inactive_agent_message
+
+    console.command.set("HELP")
+    assert console._submit_key(None) == "break"
+    assert console.command.get() == ""
+    assert console.output.get("1.0", "end").count("HELP — справка по командам") == 1
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="Mapped keyboard test uses the CI virtual display"
+)
+def test_enter_after_template_and_oid_selection_sends_real_query(window):
+    root, panel = window
+    panel.start()
+    pump_until(root, lambda: bool(panel.table.get_children()))
+    panel.open_console()
+    console = panel.console
+    console.window.geometry("1000x700+10000+10000")
+    console.window.deiconify()
+    root.update()
+    console.window.focus_force()
+    console.template_buttons["HELP"].invoke()
+    console.template_buttons["HELP"].focus_set()
+    root.update()
+    assert console.window.focus_get() is console.entry
+    console.entry.event_generate("<Return>")
+    root.update()
+    assert console.output.get("1.0", "end").count("HELP — справка по командам") == 1
+    console.command.set("GET cpu")
+    console.choices.focus_set()
+    console.choices.selection_set(0)
+    console.choices.event_generate("<<ListboxSelect>>")
+    root.update()
+    assert console.window.focus_get() is console.entry
+    console.entry.event_generate("<KP_Enter>")
+    pump_until(root, lambda: not console.client.active)
+    console.refresh(panel.controller.snapshot(), True)
+    output = console.output.get("1.0", "end")
+    assert output.count("Завершено за") == 1
+    assert "Ошибка" not in output

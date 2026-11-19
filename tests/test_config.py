@@ -263,3 +263,21 @@ scenarios:
 
     with pytest.raises(ConfigurationError, match="written by multiple scenarios"):
         load_config(config_path)
+
+
+def test_rejects_excessively_nested_yaml_without_recursion_traceback(tmp_path):
+    path = tmp_path / "deep.yaml"
+    path.write_text("[" * 1200 + "0" + "]" * 1200, encoding="utf-8")
+    with pytest.raises(ConfigurationError, match="invalid YAML"):
+        load_config(path)
+
+
+def test_yaml_cannot_construct_python_objects(tmp_path):
+    marker = tmp_path / "unexpected.txt"
+    path = tmp_path / "object.yaml"
+    path.write_text(
+        f"!!python/object/apply:builtins.open [{str(marker.as_posix())!r}, 'w']", encoding="utf-8"
+    )
+    with pytest.raises(ConfigurationError, match="invalid YAML"):
+        load_config(path)
+    assert not marker.exists()

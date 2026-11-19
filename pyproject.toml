@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools==84.0.0"]
+requires = ["setuptools==84.1.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "snmp-v2c-emulator"
-version = "0.1.0"
+version = "0.2.0"
 description = "Configurable SNMP v2c device emulator"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
@@ -31,11 +31,17 @@ quality = [
 [project.scripts]
 snmp-emulator = "snmp_emulator.__main__:main"
 
+[project.gui-scripts]
+snmp-emulator-gui = "snmp_emulator.gui:main"
+
 [tool.setuptools]
 package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.data-files]
+"share/snmp-v2c-emulator/examples" = ["examples/*.json", "examples/*.yaml"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

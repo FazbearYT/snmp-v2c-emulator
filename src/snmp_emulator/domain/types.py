@@ -8,7 +8,8 @@ MAX_OCTET_STRING_BYTES = 65535
 
 
 class SnmpDataType(StrEnum):
-    INTEGER = "Integer"
+    INTEGER32 = "Integer32"
+    INTEGER = "Integer32"
     OCTET_STRING = "OctetString"
     OBJECT_IDENTIFIER = "ObjectIdentifier"
     IP_ADDRESS = "IpAddress"
@@ -16,6 +17,12 @@ class SnmpDataType(StrEnum):
     GAUGE32 = "Gauge32"
     TIME_TICKS = "TimeTicks"
     COUNTER64 = "Counter64"
+
+    @classmethod
+    def _missing_(cls, value: object) -> SnmpDataType | None:
+        if value == "Integer":
+            return cls.INTEGER32
+        return None
 
 
 def encode_octet_string(value: str) -> bytes:

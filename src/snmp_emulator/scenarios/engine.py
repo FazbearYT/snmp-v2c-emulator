@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass
 from decimal import Decimal
 
@@ -22,6 +23,8 @@ from .actions import (
     decimal_number,
 )
 from .clock import Clock, MonotonicClock
+
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,11 +83,13 @@ class ScenarioEngine:
         scenarios: tuple[Scenario, ...],
         clock: Clock | None = None,
         tick_interval: float = 0.1,
+        duration: float | None = None,
     ) -> None:
         self.store = store
         self.scenarios = scenarios
         self.clock = clock or MonotonicClock()
         self.tick_interval = tick_interval
+        self.duration = duration
         self._started_at: Decimal | None = None
         self._scenario_baselines: dict[str, dict[str, object]] = {}
         self._scenario_cycles: dict[str, int] = {}
@@ -104,10 +109,17 @@ class ScenarioEngine:
             self._scenario_baselines[scenario.name] = baseline
             self._scenario_cycles[scenario.name] = 0
 
-    def tick(self) -> None:
+    def tick(self) -> bool:
         if self._started_at is None:
             self.start()
+        previous_values = {metric.name: metric.value for metric in self.store.snapshot()}
+        metric_scenarios: dict[str, str] = {}
         elapsed = decimal_number(self.clock.now()) - self._started_at
+        completed = self.duration is not None and elapsed >= decimal_number(self.duration)
+        if self.duration is not None:
+            elapsed = min(elapsed, decimal_number(self.duration))
+            tick_index, _ = decimal_divmod(elapsed, decimal_number(self.tick_interval))
+            elapsed = tick_index * decimal_number(self.tick_interval)
         for scenario in self.scenarios:
             local_elapsed = elapsed
             if scenario.repeat_every is not None:
@@ -116,14 +128,35 @@ class ScenarioEngine:
                 if cycle != self._scenario_cycles[scenario.name]:
                     for metric_name, value in self._scenario_baselines[scenario.name].items():
                         self.store.update(metric_name, value)
+                        metric_scenarios[metric_name] = scenario.name
                     self._scenario_cycles[scenario.name] = cycle
             for action in scenario.actions:
                 active, value = action.value_at(local_elapsed)
                 if active:
                     self.store.update(action.metric, value)
+                    metric_scenarios[action.metric] = scenario.name
+        for metric in self.store.snapshot():
+            previous_value = previous_values[metric.name]
+            if metric.value != previous_value:
+                LOGGER.info(
+                    "metric %s oid=%s changed: %r -> %r (scenario=%s)",
+                    metric.name,
+                    metric.oid,
+                    previous_value,
+                    metric.value,
+                    metric_scenarios[metric.name],
+                )
+        return completed
 
     async def run(self) -> None:
         self.start()
         while True:
-            self.tick()
-            await asyncio.sleep(self.tick_interval)
+            if self.tick():
+                return
+            elapsed = decimal_number(self.clock.now()) - self._started_at
+            tick_index, _ = decimal_divmod(elapsed, decimal_number(self.tick_interval))
+            next_elapsed = (tick_index + 1) * decimal_number(self.tick_interval)
+            if self.duration is not None:
+                next_elapsed = min(next_elapsed, decimal_number(self.duration))
+            delay = self._started_at + next_elapsed - decimal_number(self.clock.now())
+            await asyncio.sleep(max(0.0, float(delay)))
