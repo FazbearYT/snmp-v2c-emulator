@@ -284,7 +284,9 @@ def test_template_tooltips_show_help_and_cancel_on_leave(window, monkeypatch):
         assert tooltip.pending is None
         tooltip.show()
         assert tooltip.window is not None
-        assert tooltip.window.winfo_children()[0]["text"] == tooltip.text
+        (canvas,) = tooltip.window.winfo_children()
+        (label,) = canvas.winfo_children()
+        assert label["text"] == tooltip.text
         tooltip.hide()
         assert tooltip.window is None
     assert "историю ввода" in console.template_tooltips["CLEAR"].text
@@ -394,15 +396,10 @@ def test_template_and_oid_selection_restore_entry_focus_after_widget_bindings(wi
     assert console.command.get().startswith("GET 1.3.")
 
 
-def test_enter_and_keypad_enter_submit_once_from_entry_templates_and_suggestions(
-    window, monkeypatch
-):
+def test_enter_and_keypad_enter_submit_once_from_entry_templates_and_suggestions(window):
     _, panel = window
     panel.open_console()
     console = panel.console
-    calls = []
-    monkeypatch.setattr(console, "execute", lambda: calls.append(console.command.get()))
-    console.command.set("HELP")
     widgets = (
         console.entry,
         console.choices,
@@ -412,8 +409,22 @@ def test_enter_and_keypad_enter_submit_once_from_entry_templates_and_suggestions
     for widget in widgets:
         for sequence in ("<Return>", "<KP_Enter>"):
             assert widget.bind(sequence)
+
+    console.command.set("GET cpu_usage")
+    output = console.output.get("1.0", "end-1c")
+    inactive_agent_message = "Сначала запустите эмулятор в главном окне.\n"
+    assert console.run_button.instate(("!disabled",))
     assert console._submit_key(None) == "break"
-    assert calls == ["HELP"]
+    assert console.command.get() == "GET cpu_usage"
+    assert console.output.get("1.0", "end-1c") == output + inactive_agent_message
+    console.run_button.invoke()
+    assert console.command.get() == "GET cpu_usage"
+    assert console.output.get("1.0", "end-1c") == output + 2 * inactive_agent_message
+
+    console.command.set("HELP")
+    assert console._submit_key(None) == "break"
+    assert console.command.get() == ""
+    assert console.output.get("1.0", "end").count("HELP — справка по командам") == 1
 
 
 @pytest.mark.skipif(
