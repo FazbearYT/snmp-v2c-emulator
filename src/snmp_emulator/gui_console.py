@@ -36,7 +36,7 @@ class TemplateTooltip:
         self.window = tk.Toplevel(self.button)
         self.window.withdraw()
         self.window.overrideredirect(True)
-        ttk.Label(self.window, text=self.text, padding=8, wraplength=360).pack()
+        self._draw_popup(self.window)
         self.window.update_idletasks()
         x = min(
             self.button.winfo_rootx(),
@@ -47,6 +47,49 @@ class TemplateTooltip:
             y = self.button.winfo_rooty() - self.window.winfo_reqheight() - 6
         self.window.geometry(f"+{max(0, x)}+{max(0, y)}")
         self.window.deiconify()
+
+    def _draw_popup(self, window: tk.Toplevel) -> None:
+        fill = "#f8fbff"
+        border = "#91a6ba"
+        corner_background = ttk.Style(window).lookup("TFrame", "background")
+        if window.tk.call("tk", "windowingsystem") == "win32":
+            corner_background = "#ff00ff"
+            window.attributes("-transparentcolor", corner_background)
+
+        canvas = tk.Canvas(
+            window,
+            background=corner_background,
+            borderwidth=0,
+            highlightthickness=0,
+        )
+        label = ttk.Label(canvas, text=self.text, background=fill, wraplength=360)
+        padding_x, padding_y = 12, 8
+        width = label.winfo_reqwidth() + 2 * padding_x
+        height = label.winfo_reqheight() + 2 * padding_y
+        canvas.configure(width=width, height=height)
+        canvas.pack()
+
+        left, top = 1, 1
+        right, bottom = width - 2, height - 2
+        radius = 12
+        canvas.create_polygon(
+            (left, top + radius),
+            (left, top),
+            (left + radius, top),
+            (right - radius, top),
+            (right, top),
+            (right, top + radius),
+            (right, bottom - radius),
+            (right, bottom),
+            (right - radius, bottom),
+            (left + radius, bottom),
+            (left, bottom),
+            (left, bottom - radius),
+            fill=fill,
+            outline=border,
+            smooth=True,
+        )
+        canvas.create_window(padding_x, padding_y, window=label, anchor="nw")
 
     def hide(self, _event: tk.Event | None = None) -> None:
         if self.pending is not None:
@@ -164,7 +207,7 @@ class SnmpConsoleWindow:
             widget.bind("<KP_Enter>", self._submit_key)
 
     def _submit_key(self, _event: tk.Event) -> str:
-        self.execute()
+        self.run_button.invoke()
         return "break"
 
     def _focus_command_entry(self) -> None:
@@ -234,10 +277,8 @@ class SnmpConsoleWindow:
         self._append(f"[{datetime.now().astimezone():%Y-%m-%d %H:%M:%S %z}] {message}")
 
     def _update_run_button(self) -> None:
-        local = self.command.get().strip().upper() in LOCAL_COMMANDS
-        enabled = bool(self.command.get().strip()) and (
-            local or (self.ready and not self.client.active)
-        )
+        text = self.command.get().strip()
+        enabled = bool(text) and (text.upper() in LOCAL_COMMANDS or not self.client.active)
         self.run_button.configure(state="normal" if enabled else "disabled")
 
     def _drain_output(self) -> None:
