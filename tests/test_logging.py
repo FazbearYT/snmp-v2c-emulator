@@ -22,7 +22,7 @@ def run_python(*arguments):
     return subprocess.run(
         [sys.executable, *arguments],
         cwd=PROJECT,
-        env={**os.environ, "PYTHONPATH": str(PROJECT / "src")},
+        env={**os.environ, "PYTHONPATH": str(PROJECT / "src"), "PYTHONIOENCODING": "utf-8"},
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -155,6 +155,32 @@ def test_cli_configuration_errors_have_timestamp_without_traceback(tmp_path, fil
     assert re.match(rf"{TIMESTAMP} ERROR \S+: configuration error: ", result.stderr)
     assert result.stderr.count("configuration error:") == 1
     assert expected in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("scalar", "tag"),
+    [
+        ("!!int invalid", "int"),
+        ('!!int ""', "int"),
+        ("!!float invalid", "float"),
+        ("!!bool invalid", "bool"),
+        ("!!timestamp invalid", "timestamp"),
+        ("2026-02-30", "timestamp"),
+    ],
+)
+def test_cli_reports_invalid_yaml_scalar_without_traceback(tmp_path, scalar, tag):
+    config = tmp_path / "device.yaml"
+    config.write_text(f"schema_version: {scalar}\n", encoding="utf-8")
+
+    result = run_python("-m", "snmp_emulator", "--config", str(config), "--check-config")
+
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert re.match(rf"{TIMESTAMP} ERROR \S+: configuration error: invalid YAML: ", result.stderr)
+    assert f"invalid value for YAML tag {tag!r}" in result.stderr
+    assert str(config) in result.stderr
+    assert "line 1, column 17" in result.stderr
     assert "Traceback" not in result.stderr
 
 
