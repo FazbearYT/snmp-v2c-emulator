@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import sys
+import logging
 import tkinter as tk
 from collections import deque
 from pathlib import Path
@@ -8,6 +8,9 @@ from tkinter import filedialog, ttk
 
 from .gui_console import SnmpConsoleWindow
 from .gui_controller import PROFILES, PanelController, PanelSnapshot, examples_directory
+from .logging_config import configure_logging
+
+LOGGER = logging.getLogger(__name__)
 
 METRIC_LABELS = {
     "cpu_usage": "Загрузка процессора",
@@ -354,10 +357,11 @@ class EmulatorPanel:
 
 
 def main() -> int:
+    configure_logging()
     try:
         root = tk.Tk()
     except tk.TclError as exc:
-        print(f"Не удалось открыть GUI: {exc}. Нужны Tk и графическая сессия.", file=sys.stderr)
+        LOGGER.error("Не удалось открыть GUI: %s. Нужны Tk и графическая сессия.", exc)
         return 1
     EmulatorPanel(root)
     root.mainloop()

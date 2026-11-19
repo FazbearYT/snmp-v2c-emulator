@@ -4,7 +4,6 @@ import argparse
 import asyncio
 import logging
 import signal
-import sys
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -13,6 +12,7 @@ from . import __version__
 from .application import EmulatorApplication
 from .config import ConfigurationError, load_config
 from .json_config import load_json_config
+from .logging_config import configure_logging
 
 LOGGER = logging.getLogger(__name__)
 
@@ -69,6 +69,7 @@ async def run_application(
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    configure_logging(args.log_level)
     if args.config is not None:
         if args.device_config is not None or args.scenario is not None:
             parser.error("--config cannot be combined with --device-config or --scenario")
@@ -81,21 +82,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             else load_json_config(args.device_config, args.scenario)
         )
     except ConfigurationError as exc:
-        print(f"configuration error: {exc}", file=sys.stderr)
+        LOGGER.error("configuration error: %s", exc)
         return 2
     if args.check_config:
         print(f"configuration is valid: {len(config.metrics)} metrics")
         return 0
-    logging.basicConfig(
-        level=getattr(logging, args.log_level),
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
     try:
-        stopped = asyncio.run(run_application(EmulatorApplication(config)))
-        if stopped:
-            LOGGER.info("emulator stopped")
+        asyncio.run(run_application(EmulatorApplication(config)))
     except KeyboardInterrupt:
-        LOGGER.info("emulator stopped")
+        pass
     except OSError as exc:
         LOGGER.error("emulator failed: %s", exc)
         return 1

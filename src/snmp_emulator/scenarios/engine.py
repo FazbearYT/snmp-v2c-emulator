@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass
 from decimal import Decimal
 
@@ -22,6 +23,8 @@ from .actions import (
     decimal_number,
 )
 from .clock import Clock, MonotonicClock
+
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,6 +112,8 @@ class ScenarioEngine:
     def tick(self) -> bool:
         if self._started_at is None:
             self.start()
+        previous_values = {metric.name: metric.value for metric in self.store.snapshot()}
+        metric_scenarios: dict[str, str] = {}
         elapsed = decimal_number(self.clock.now()) - self._started_at
         completed = self.duration is not None and elapsed >= decimal_number(self.duration)
         if self.duration is not None:
@@ -123,11 +128,24 @@ class ScenarioEngine:
                 if cycle != self._scenario_cycles[scenario.name]:
                     for metric_name, value in self._scenario_baselines[scenario.name].items():
                         self.store.update(metric_name, value)
+                        metric_scenarios[metric_name] = scenario.name
                     self._scenario_cycles[scenario.name] = cycle
             for action in scenario.actions:
                 active, value = action.value_at(local_elapsed)
                 if active:
                     self.store.update(action.metric, value)
+                    metric_scenarios[action.metric] = scenario.name
+        for metric in self.store.snapshot():
+            previous_value = previous_values[metric.name]
+            if metric.value != previous_value:
+                LOGGER.info(
+                    "metric %s oid=%s changed: %r -> %r (scenario=%s)",
+                    metric.name,
+                    metric.oid,
+                    previous_value,
+                    metric.value,
+                    metric_scenarios[metric.name],
+                )
         return completed
 
     async def run(self) -> None:
