@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 from collections import OrderedDict, deque
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Callable
 
 from pyasn1.codec.ber import decoder
@@ -75,7 +75,7 @@ class RequestAudit:
             request_id = int(v2c.apiPDU.get_request_id(pdu))
             oids = tuple(str(oid) for oid, _ in v2c.apiPDU.get_varbinds(pdu))
             record = RequestRecord(
-                datetime.now(timezone.utc).isoformat(),
+                datetime.now(UTC).isoformat(),
                 str(address[0]),
                 int(address[1]),
                 pdu_type,
