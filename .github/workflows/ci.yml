@@ -1,21 +1,15 @@
-name: CI
+name: CI / main full
 
 env:
   UV_VERSION: "0.12.24"
 
-# Branch pushes are validated via their pull requests; do not run the same
-# test matrix twice for a feature branch update.
 on:
   push:
-    branches: [develop]
+    branches: [main]
   pull_request:
-    branches: [develop]
+    branches: [main]
+    types: [opened, reopened, synchronize, ready_for_review, converted_to_draft]
   workflow_dispatch:
-
-# Replace superseded PR runs while preserving develop and manual runs.
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -71,7 +65,7 @@ jobs:
       - name: Check formatting
         run: uv run --locked --python "3.13" --all-extras ruff format --check .
       - name: Audit workflow security
-        run: uv run --locked --python "3.13" --all-extras zizmor .github/workflows/ci.yml
+        run: uv run --locked --python "3.13" --all-extras zizmor .github/workflows/*.yml
       - name: Audit Python dependencies
         run: |
           uv export --quiet --locked --all-extras --no-emit-project \
