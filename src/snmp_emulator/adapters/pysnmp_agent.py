@@ -332,10 +332,13 @@ class StoreInstrumentation(AbstractMibInstrumController):
         return self.oid_responses.get(oid, "normal")
 
     def _missing_value(self, oid: ObjectIdentifier) -> Any:
-        # A scalar with the same object identifier but a different instance
-        # is an absent instance; a completely unknown object is absent.
         for metric in self.store.snapshot():
-            if metric.oid.parts[:-1] == oid.parts[:-1]:
+            object_prefix = metric.oid.parts[:-1]
+            if (
+                len(object_prefix) >= 2
+                and oid.parts[: len(object_prefix)] == object_prefix
+                and self._mode(metric.oid) != "noSuchObject"
+            ):
                 return exval.noSuchInstance
         return exval.noSuchObject
 
