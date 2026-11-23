@@ -44,16 +44,31 @@ class EmulatorApplication:
             duration=config.duration,
         )
 
+    async def _schedule_unavailability(self, started_at: float) -> None:
+        outage = self.config.unavailability
+        if outage is None:
+            return
+        loop = asyncio.get_running_loop()
+        await asyncio.sleep(max(0, started_at + outage.at - loop.time()))
+        self.agent.set_unavailable(True)
+        try:
+            await asyncio.sleep(max(0, started_at + outage.at + outage.duration - loop.time()))
+        finally:
+            self.agent.set_unavailable(False)
+
     async def run(self) -> None:
         if self._running:
             raise RuntimeError("emulator application is already running")
         self._running = True
         try:
             await self.agent.start()
+            started_at = asyncio.get_running_loop().time()
             self.started.set()
             LOGGER.info("listening on udp://%s:%d", self.config.agent.host, self.config.agent.port)
             async with asyncio.TaskGroup() as tasks:
                 tasks.create_task(self.scenario_engine.run())
+                if self.config.unavailability is not None:
+                    tasks.create_task(self._schedule_unavailability(started_at))
                 tasks.create_task(asyncio.Event().wait())
         finally:
             was_started = self.started.is_set()

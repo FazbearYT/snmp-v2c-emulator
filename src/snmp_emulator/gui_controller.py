@@ -23,6 +23,10 @@ PROFILES = {
     "device · 7 метрик · Рост трафика": ("device-7.json", "traffic-growth.json"),
     "device · 8 метрик · Рост нагрузки": ("device-8.json", "load-growth.json"),
     "device · 6 метрик · Восстановление": ("device-emergency.json", "recovery.json"),
+    "device · 6 метрик · Недоступность": (
+        "device-normal.json",
+        "device-unavailability.json",
+    ),
 }
 
 
@@ -119,7 +123,11 @@ class PanelController:
                 elapsed = time.monotonic() - started_at
                 completed = config.duration is not None and elapsed >= config.duration
                 self._publish(
-                    state="completed" if completed else "running",
+                    state=(
+                        "unavailable"
+                        if application.agent.unavailable
+                        else ("completed" if completed else "running")
+                    ),
                     elapsed=elapsed,
                     duration=config.duration,
                     address=f"{config.agent.host}:{config.agent.port}",

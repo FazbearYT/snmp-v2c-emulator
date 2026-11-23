@@ -7,7 +7,14 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
-from .config import AgentConfig, ConfigurationError, EmulatorConfig, MetricConfig, ScenarioConfig
+from .config import (
+    AgentConfig,
+    ConfigurationError,
+    DeviceUnavailabilityConfig,
+    EmulatorConfig,
+    MetricConfig,
+    ScenarioConfig,
+)
 from .domain.oid import ObjectIdentifier
 
 Seconds = Annotated[float, Field(ge=0, allow_inf_nan=False, strict=True)]
@@ -70,15 +77,30 @@ class StepRule(OidRule):
 Rule = Annotated[ConstantRule | JumpRule | StepRule, Field(discriminator="type")]
 
 
+class UnavailabilityRule(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    at: Seconds
+    duration: PositiveSeconds
+
+
 class ScenarioDocument(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     duration: PositiveSeconds
     update_interval: PositiveSeconds
-    rules: list[Rule] = Field(min_length=1)
+    rules: list[Rule] = Field(default_factory=list)
+    unavailability: UnavailabilityRule | None = None
 
     @model_validator(mode="after")
     def validate_rules(self) -> ScenarioDocument:
+        if not self.rules and self.unavailability is None:
+            raise ValueError("scenario requires rules or unavailability")
+        if self.unavailability is not None:
+            if self.unavailability.at + self.unavailability.duration > self.duration:
+                raise ValueError("unavailability interval must end within scenario duration")
+            if any(not isinstance(rule, ConstantRule) for rule in self.rules):
+                raise ValueError("unavailability requires constant metric values")
         oids = [rule.oid for rule in self.rules]
         if len(set(oids)) != len(oids):
             raise ValueError("scenario may contain only one rule per OID")
@@ -127,6 +149,11 @@ def bind_config(device: DeviceConfig, scenario: ScenarioDocument) -> EmulatorCon
         scenarios=[ScenarioConfig(name="json", actions=actions)],
         duration=scenario.duration,
         update_interval=scenario.update_interval,
+        unavailability=(
+            DeviceUnavailabilityConfig.model_validate(scenario.unavailability.model_dump())
+            if scenario.unavailability is not None
+            else None
+        ),
     )
 
 

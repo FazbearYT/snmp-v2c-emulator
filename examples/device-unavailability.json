@@ -1,0 +1,9 @@
+{
+  "duration": 6,
+  "update_interval": 0.1,
+  "rules": [],
+  "unavailability": {
+    "at": 2,
+    "duration": 2
+  }
+}

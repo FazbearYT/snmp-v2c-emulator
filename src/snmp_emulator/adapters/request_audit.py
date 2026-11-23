@@ -142,7 +142,33 @@ class RequestAudit:
             reason if reason is not None else "-",
         )
 
-    def response(self, datagram: bytes, address: Any, *, sent: bool) -> None:
+    def suppress_datagram(self, datagram: bytes, address: Any) -> None:
+        message = self._parse(datagram)
+        if message is None:
+            return
+        try:
+            if bytes(v2c.apiMessage.get_community(message)) != self._community:
+                return
+            pdu = v2c.apiMessage.get_pdu(message)
+            if pdu.tagSet not in (
+                v2c.GetRequestPDU.tagSet,
+                v2c.GetNextRequestPDU.tagSet,
+                v2c.GetBulkRequestPDU.tagSet,
+            ):
+                return
+            self.suppressed(address, int(v2c.apiPDU.get_request_id(pdu)))
+        except Exception:
+            return
+
+    def suppressed(self, address: Any, request_id: int) -> None:
+        """Finish the most recently received request without sending a reply."""
+        queue = self._by_key.get(self._key(address, request_id))
+        if queue:
+            self._finish(queue[-1], "not_sent", reason="device_unavailable")
+
+    def response(
+        self, datagram: bytes, address: Any, *, sent: bool, suppressed: bool = False
+    ) -> None:
         message = self._parse(datagram)
         if message is None:
             return
@@ -176,7 +202,9 @@ class RequestAudit:
             error_status=status,
             error_index=index,
             exceptions=exceptions,
-            reason=None if sent else "transport_send_failed",
+            reason=(
+                None if sent else ("device_unavailable" if suppressed else "transport_send_failed")
+            ),
         )
 
     def close(self) -> None:
