@@ -13,6 +13,7 @@ from .config import (
     DeviceUnavailabilityConfig,
     EmulatorConfig,
     MetricConfig,
+    OidResponseConfig,
     ScenarioConfig,
 )
 from .domain.oid import ObjectIdentifier
@@ -84,6 +85,18 @@ class UnavailabilityRule(BaseModel):
     duration: PositiveSeconds
 
 
+class OidResponseRule(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    oid: str
+    mode: Literal["normal", "noSuchObject", "noSuchInstance", "genErr"]
+
+    @field_validator("oid")
+    @classmethod
+    def normalize_oid(cls, value: str) -> str:
+        return str(ObjectIdentifier.parse(value))
+
+
 class ScenarioDocument(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -91,11 +104,15 @@ class ScenarioDocument(BaseModel):
     update_interval: PositiveSeconds
     rules: list[Rule] = Field(default_factory=list)
     unavailability: UnavailabilityRule | None = None
+    oid_responses: list[OidResponseRule] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_rules(self) -> ScenarioDocument:
-        if not self.rules and self.unavailability is None:
-            raise ValueError("scenario requires rules or unavailability")
+        if not self.rules and self.unavailability is None and not self.oid_responses:
+            raise ValueError("scenario requires rules, unavailability or OID responses")
+        mode_oids = [item.oid for item in self.oid_responses]
+        if len(mode_oids) != len(set(mode_oids)):
+            raise ValueError("OID response configuration may contain only one mode per OID")
         if self.unavailability is not None:
             if self.unavailability.at + self.unavailability.duration > self.duration:
                 raise ValueError("unavailability interval must end within scenario duration")
@@ -149,6 +166,9 @@ def bind_config(device: DeviceConfig, scenario: ScenarioDocument) -> EmulatorCon
         scenarios=[ScenarioConfig(name="json", actions=actions)],
         duration=scenario.duration,
         update_interval=scenario.update_interval,
+        oid_responses=[
+            OidResponseConfig(oid=item.oid, mode=item.mode) for item in scenario.oid_responses
+        ],
         unavailability=(
             DeviceUnavailabilityConfig.model_validate(scenario.unavailability.model_dump())
             if scenario.unavailability is not None
