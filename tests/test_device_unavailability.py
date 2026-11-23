@@ -1,4 +1,5 @@
 """Network and validation coverage for task 08 device unavailability."""
+
 from __future__ import annotations
 
 import asyncio
@@ -158,9 +159,7 @@ def test_requires_constant_values_and_validates_legacy_yaml_model():
             {
                 "duration": 2.0,
                 "update_interval": 0.1,
-                "rules": [
-                    {"type": "jump", "oid": OID, "at": 1.0, "value": 16}
-                ],
+                "rules": [{"type": "jump", "oid": OID, "at": 1.0, "value": 16}],
                 "unavailability": {"at": 0.5, "duration": 0.5},
             }
         )
@@ -174,9 +173,7 @@ def test_requires_constant_values_and_validates_legacy_yaml_model():
                 "scenarios": [
                     {
                         "name": "legacy",
-                        "actions": [
-                            {"type": "set", "metric": "cpu", "at": 1.0, "value": 16}
-                        ],
+                        "actions": [{"type": "set", "metric": "cpu", "at": 1.0, "value": 16}],
                     }
                 ],
             }
@@ -203,9 +200,7 @@ def test_gui_panel_displays_temporary_unavailability(tmp_path):
         json.dumps(
             {
                 "agent": {"host": "127.0.0.1", "port": port},
-                "metrics": [
-                    {"name": "cpu", "oid": OID, "type": "Integer32", "initial": 15}
-                ],
+                "metrics": [{"name": "cpu", "oid": OID, "type": "Integer32", "initial": 15}],
             }
         ),
         encoding="utf-8",

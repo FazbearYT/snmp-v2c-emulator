@@ -203,9 +203,7 @@ class RequestAudit:
             error_index=index,
             exceptions=exceptions,
             reason=(
-                None
-                if sent
-                else ("device_unavailable" if suppressed else "transport_send_failed")
+                None if sent else ("device_unavailable" if suppressed else "transport_send_failed")
             ),
         )
 
