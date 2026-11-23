@@ -127,3 +127,40 @@ async def test_audit_clears_pending_on_restart(caplog):
     results = [r.message for r in caplog.records if "event=result" in r.message]
     assert len(received) == len(results) == 2
     assert all("outcome=sent" in line for line in results)
+
+
+@pytest.mark.asyncio
+async def test_audit_logs_too_big_response(caplog):
+    port = free_port()
+    large = Metric(
+        "payload", ObjectIdentifier.parse(OID), SnmpDataType.OCTET_STRING, "x" * 65535
+    )
+    agent = SnmpAgent("127.0.0.1", port, "public", MetricStore([large]))
+    caplog.set_level(logging.INFO, logger="snmp_emulator.adapters.request_audit")
+    await agent.start()
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.bind(("127.0.0.1", 0))
+            sock.setblocking(False)
+            pdu = await exchange(sock, port, request(v2c.GetRequestPDU))
+        assert int(v2c.apiPDU.get_error_status(pdu)) == 1
+        assert int(v2c.apiPDU.get_error_index(pdu)) == 0
+    finally:
+        await agent.stop()
+    results = [r.message for r in caplog.records if "event=result" in r.message]
+    assert len(results) == 1
+    assert "outcome=sent error_status=1 error_index=0" in results[0]
+
+
+def test_audit_reports_unanswered_request_on_shutdown(caplog):
+    from snmp_emulator.adapters.request_audit import RequestAudit
+
+    caplog.set_level(logging.INFO, logger="snmp_emulator.adapters.request_audit")
+    audit = RequestAudit(b"public", V2cMessage)
+    audit.received(request(v2c.GetRequestPDU), ("127.0.0.1", 49000))
+    audit.close()
+    audit.close()
+    results = [r.message for r in caplog.records if "event=result" in r.message]
+    assert len(results) == 1
+    assert "outcome=not_sent" in results[0]
+    assert "reason=agent_stopped" in results[0]
