@@ -30,9 +30,20 @@ from snmp_emulator.domain.types import SnmpDataType
 from snmp_emulator.json_config import load_json_config
 
 JSON_PROFILES = {
+    "demo-normal": ("device-normal.json", {}),
+    "demo-degradation": (
+        "device-normal.json",
+        {
+            "cpu_usage": 95,
+            "temperature": 80,
+            "memory_usage": 85,
+            "interface_status": "down",
+            "interface_errors": 120,
+        },
+    ),
     "recovery": (
         "device-emergency.json",
-        {"cpu_usage": 15, "temperature": 35, "interface_status": "up"},
+        {"cpu_usage": 15, "temperature": 35, "memory_usage": 40, "interface_status": "up"},
     ),
     "stable": ("device.json", {}),
     "temperature-jump": ("device.json", {"temperature": 80}),
@@ -50,6 +61,17 @@ JSON_PROFILES = {
             "inbound_mbps": 520,
             "outbound_mbps": 360,
             "status": "busy",
+        },
+    ),
+    "variable-load": (
+        "device-10.json",
+        {
+            "cpu_usage": 21,
+            "memory_usage": 38,
+            "temperature": 36,
+            "inbound_mbps": 110,
+            "outbound_mbps": 80,
+            "active_flows": 210,
         },
     ),
 }
@@ -154,6 +176,71 @@ async def smoke_json_scenario(examples: Path, name: str) -> None:
         await restarted.agent.stop()
 
 
+async def smoke_special_demo(examples: Path, name: str) -> None:
+    device_name, scenario_name = (
+        "device-normal.json",
+        "device-unavailability.json" if name == "outage" else "partial-oid-unavailability.json",
+    )
+    source = load_json_config(examples / device_name, examples / scenario_name)
+    document = source.model_dump(mode="json")
+    document["agent"].update(host="127.0.0.1", port=reserve_udp_port())
+    document["duration"] /= 10
+    document["update_interval"] /= 10
+    if document["unavailability"] is not None:
+        document["unavailability"]["at"] /= 10
+        document["unavailability"]["duration"] /= 10
+    config = EmulatorConfig.model_validate(document)
+    application = EmulatorApplication(config)
+    task = asyncio.create_task(application.run())
+    client = engine.SnmpEngine()
+    try:
+        await asyncio.wait_for(application.started.wait(), timeout=3)
+        target = await UdpTransportTarget.create(
+            ("127.0.0.1", config.agent.port), timeout=0.1, retries=0
+        )
+
+        async def get(oid: str):
+            return await get_cmd(
+                client,
+                CommunityData("public", mpModel=1),
+                target,
+                ContextData(),
+                ObjectType(ObjectIdentity(oid)),
+            )
+
+        cpu = "1.3.6.1.4.1.55555.4.1.0"
+        status_oid = "1.3.6.1.4.1.55555.4.5.0"
+        error, status, _, results = await get(cpu)
+        if error is not None or status or int(results[0][1]) != 15:
+            raise RuntimeError("installed special demo cannot read a healthy CPU OID")
+        if name == "outage":
+            async with asyncio.timeout(2):
+                while not application.agent.unavailable:
+                    await asyncio.sleep(0.01)
+            error, _, _, _ = await get(cpu)
+            if error is None:
+                raise RuntimeError("installed full-outage demo did not time out")
+            async with asyncio.timeout(2):
+                while application.agent.unavailable:
+                    await asyncio.sleep(0.01)
+            error, status, _, results = await get(cpu)
+            if error is not None or status or int(results[0][1]) != 15:
+                raise RuntimeError("installed full-outage demo did not recover")
+        else:
+            temperature = "1.3.6.1.4.1.55555.4.2.0"
+            error, status, _, values = await get(temperature)
+            if error is not None or status or values[0][1].tagSet != exval.noSuchObject.tagSet:
+                raise RuntimeError("installed partial demo did not return noSuchObject")
+            error, status, index, _ = await get(status_oid)
+            if error is not None or int(status) != 5 or int(index) != 1:
+                raise RuntimeError("installed partial demo did not return genErr/index")
+    finally:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+        client.close_dispatcher()
+
+
 async def smoke_installed_json() -> None:
     examples = Path(sysconfig.get_path("data")) / "share" / "snmp-v2c-emulator" / "examples"
     for name in JSON_SCENARIOS:
@@ -171,6 +258,24 @@ async def smoke_installed_json() -> None:
             check=True,
         )
         await smoke_json_scenario(examples, name)
+    for name, scenario in (
+        ("outage", "device-unavailability.json"),
+        ("partial", "partial-oid-unavailability.json"),
+    ):
+        subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "snmp_emulator",
+                "--device-config",
+                str(examples / "device-normal.json"),
+                "--scenario",
+                str(examples / scenario),
+                "--check-config",
+            ],
+            check=True,
+        )
+        await smoke_special_demo(examples, name)
 
 
 def reserve_udp_port() -> int:

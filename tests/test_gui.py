@@ -316,6 +316,7 @@ def test_recovery_panel_completes_and_restarts_from_emergency_values(window):
                 **initial,
                 "cpu_usage": 15,
                 "temperature": 35,
+                "memory_usage": 40,
                 "interface_status": "up",
             }
             assert panel.table.set("interface_status", "value") == "up"

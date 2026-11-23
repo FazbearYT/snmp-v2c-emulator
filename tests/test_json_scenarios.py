@@ -33,7 +33,7 @@ def test_recovery_starts_independently_and_preserves_accumulated_errors() -> Non
         "cpu_usage": 95,
         "temperature": 80,
         "description": "SNMP demo device",
-        "memory_usage": 40,
+        "memory_usage": 85,
         "interface_status": "down",
         "interface_errors": 120,
     }
@@ -50,15 +50,15 @@ def test_recovery_starts_independently_and_preserves_accumulated_errors() -> Non
             duration=config.duration,
         )
         scenario.start()
-        for timestamp, cpu, temperature, status in (
-            ("0", 95, 80, "down"),
-            ("0.999", 95, 80, "down"),
-            ("1", 85, 75, "down"),
-            ("8", 15, 40, "down"),
-            ("9", 15, 35, "down"),
-            ("10", 15, 35, "up"),
-            ("12", 15, 35, "up"),
-            ("100", 15, 35, "up"),
+        for timestamp, cpu, temperature, memory, status in (
+            ("0", 95, 80, 85, "down"),
+            ("0.999", 95, 80, 85, "down"),
+            ("1", 85, 75, 80, "down"),
+            ("8", 15, 40, 45, "down"),
+            ("9", 15, 35, 40, "down"),
+            ("10", 15, 35, 40, "up"),
+            ("12", 15, 35, 40, "up"),
+            ("100", 15, 35, 40, "up"),
         ):
             clock.value = Decimal(timestamp)
             scenario.tick()
@@ -67,6 +67,7 @@ def test_recovery_starts_independently_and_preserves_accumulated_errors() -> Non
                 **initial,
                 "cpu_usage": cpu,
                 "temperature": temperature,
+                "memory_usage": memory,
                 "interface_status": status,
             }
         assert values == expected_final
@@ -102,6 +103,10 @@ def configuration(rule: dict, duration: float = 1, interval: float = 0.1):
         (
             {"type": "step", "step": -3, "limit": -1},
             [("0", 10), ("0.1", 7), ("0.3", 1), ("0.4", -1), ("2", -1)],
+        ),
+        (
+            {"type": "sequence", "values": [11, 30, 16, 45, 20]},
+            [("0", 11), ("0.099", 11), ("0.1", 30), ("0.2", 16), ("0.3", 45), ("2", 20)],
         ),
     ],
 )

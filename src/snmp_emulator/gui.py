@@ -22,6 +22,8 @@ METRIC_LABELS = {
     "active_ports": "Активные порты",
     "inbound_mbps": "Входящий трафик, Мбит/с",
     "outbound_mbps": "Исходящий трафик, Мбит/с",
+    "active_flows": "Активные потоки",
+    "dropped_packets_per_second": "Потери пакетов, пакетов/с",
     "interface_status": "Состояние интерфейса",
     "interface_errors": "Ошибки интерфейса",
 }
@@ -29,6 +31,7 @@ STATES = {
     "idle": "Готов к запуску",
     "starting": "Загрузка и запуск…",
     "running": "Эмулятор работает",
+    "unavailable": "Устройство временно недоступно · SNMP-ответы подавлены",
     "completed": "Сценарий завершён · значения доступны по SNMP",
     "stopped": "Эмулятор остановлен · порт освобождён",
     "error": "Не удалось запустить или продолжить работу",
@@ -250,7 +253,7 @@ class EmulatorPanel:
                     snapshot,
                     self.controller.active
                     and not self._stopping
-                    and snapshot.state in ("running", "completed"),
+                    and snapshot.state in ("running", "completed", "unavailable"),
                 )
             self.status.set(
                 "Остановка…"

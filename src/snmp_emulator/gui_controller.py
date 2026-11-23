@@ -13,16 +13,37 @@ from .application import EmulatorApplication
 from .config import ConfigurationError
 from .domain.metric import Metric
 from .json_config import load_json_config
+from .run_report import default_report_path
 
 LOGGER = logging.getLogger(__name__)
 
 PROFILES = {
+    "Демо ТЗ · 1/5 · Нормальная работа": ("device-normal.json", "demo-normal.json"),
+    "Демо ТЗ · 2/5 · Деградация": ("device-normal.json", "demo-degradation.json"),
+    "Демо ТЗ · 3/5 · Восстановление": ("device-emergency.json", "recovery.json"),
+    "Демо ТЗ · 4/5 · Полная недоступность": (
+        "device-normal.json",
+        "device-unavailability.json",
+    ),
+    "Демо ТЗ · 5/5 · Частичная недоступность": (
+        "device-normal.json",
+        "partial-oid-unavailability.json",
+    ),
     "device · 5 метрик · Стабильные показатели": ("device.json", "stable.json"),
     "device · 5 метрик · Скачок температуры": ("device.json", "temperature-jump.json"),
     "device · 5 метрик · Рост загрузки процессора": ("device.json", "cpu-step.json"),
     "device · 7 метрик · Рост трафика": ("device-7.json", "traffic-growth.json"),
     "device · 8 метрик · Рост нагрузки": ("device-8.json", "load-growth.json"),
+    "device · 10 метрик · Переменная нагрузка": ("device-10.json", "variable-load.json"),
     "device · 6 метрик · Восстановление": ("device-emergency.json", "recovery.json"),
+    "device · 6 метрик · Недоступность": (
+        "device-normal.json",
+        "device-unavailability.json",
+    ),
+    "device · 6 метрик · Частичная недоступность": (
+        "device-normal.json",
+        "partial-oid-unavailability.json",
+    ),
 }
 
 
@@ -86,7 +107,15 @@ class PanelController:
         try:
             config = load_json_config(device, scenario)
             if not self._stop.is_set():
-                asyncio.run(self._observe(EmulatorApplication(config)))
+                asyncio.run(
+                    self._observe(
+                        EmulatorApplication(
+                            config,
+                            scenario_id=scenario.stem,
+                            report_path=default_report_path(scenario),
+                        )
+                    )
+                )
         except ConfigurationError as exc:
             LOGGER.error("configuration error: %s", exc)
             self._publish(state="error", error=str(exc))
@@ -119,7 +148,11 @@ class PanelController:
                 elapsed = time.monotonic() - started_at
                 completed = config.duration is not None and elapsed >= config.duration
                 self._publish(
-                    state="completed" if completed else "running",
+                    state=(
+                        "unavailable"
+                        if application.agent.unavailable
+                        else ("completed" if completed else "running")
+                    ),
                     elapsed=elapsed,
                     duration=config.duration,
                     address=f"{config.agent.host}:{config.agent.port}",

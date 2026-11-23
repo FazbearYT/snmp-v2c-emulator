@@ -13,6 +13,7 @@ from pysnmp.entity.rfc3413 import cmdrsp, context
 from pysnmp.proto import rfc1901, rfc1902, rfc1905
 from pysnmp.proto.api import v2c
 from pysnmp.proto.mpmod.rfc2576 import SnmpV2cMessageProcessingModel
+from pysnmp.smi import error as smi_error
 from pysnmp.smi import exval
 from pysnmp.smi.instrum import AbstractMibInstrumController
 
@@ -20,6 +21,8 @@ from ..domain.metric import Metric
 from ..domain.oid import ObjectIdentifier
 from ..domain.store import MetricStore
 from ..domain.types import SnmpDataType, encode_octet_string
+from ..run_report import RequestCounters
+from .request_audit import SIMULATED_GENERR_RESPONSE, RequestAudit
 
 LOGGER = logging.getLogger(__name__)
 MAX_UDP_PAYLOAD_BYTES = 65507
@@ -123,15 +126,63 @@ class ResponseSizeGuard:
         )
 
 
-class V2cGetCommandResponder(ResponseSizeGuard, cmdrsp.GetCommandResponder):
+class SimulatedOidGenError(smi_error.GenError):
+    """A genErr explicitly triggered by an OID response mode."""
+
+
+class SimulatedErrorResponder:
+    """Translate instrumentation failures into SNMP genErr responses."""
+
+    def _send_gen_error(
+        self,
+        snmp_engine: engine.SnmpEngine,
+        state_reference: Any,
+        pdu: Any,
+        error: Any,
+        original: list[tuple[Any, Any]] | None = None,
+    ) -> None:
+        if original is None:
+            original = v2c.apiPDU.get_varbinds(pdu)
+        index = int(error["idx"]) + 1
+        if not 1 <= index <= len(original):
+            index = 1
+        marker = SIMULATED_GENERR_RESPONSE.set(isinstance(error, SimulatedOidGenError))
+        try:
+            self.send_varbinds(snmp_engine, state_reference, "genErr", index, original)
+        finally:
+            SIMULATED_GENERR_RESPONSE.reset(marker)
+        self.release_state_information(state_reference)
+
+    def handle_management_operation(
+        self,
+        snmp_engine: engine.SnmpEngine,
+        state_reference: Any,
+        context_name: Any,
+        pdu: Any,
+    ) -> None:
+        try:
+            super().handle_management_operation(  # type: ignore[misc]
+                snmp_engine, state_reference, context_name, pdu
+            )
+        except smi_error.GenError as exc:
+            self._send_gen_error(snmp_engine, state_reference, pdu, exc)
+
+
+class V2cGetCommandResponder(
+    SimulatedErrorResponder, ResponseSizeGuard, cmdrsp.GetCommandResponder
+):
     pass
 
 
-class V2cNextCommandResponder(ResponseSizeGuard, cmdrsp.NextCommandResponder):
+class V2cNextCommandResponder(
+    SimulatedErrorResponder, ResponseSizeGuard, cmdrsp.NextCommandResponder
+):
     pass
 
 
-class V2cBulkCommandResponder(ResponseSizeGuard, cmdrsp.BulkCommandResponder):
+class V2cBulkCommandResponder(
+    SimulatedErrorResponder, ResponseSizeGuard, cmdrsp.BulkCommandResponder
+):
     truncate_varbinds = True
 
     def handle_management_operation(
@@ -142,33 +193,50 @@ class V2cBulkCommandResponder(ResponseSizeGuard, cmdrsp.BulkCommandResponder):
         pdu: Any,
     ) -> None:
         non_repeaters = max(int(v2c.apiBulkPDU.get_non_repeaters(pdu)), 0)
-        max_repetitions = max(int(v2c.apiBulkPDU.get_max_repetitions(pdu)), 0)
-        request_var_binds = v2c.apiPDU.get_varbinds(pdu)[: self.max_varbinds]
-        non_repeater_count = min(non_repeaters, len(request_var_binds))
-        repeater_count = max(len(request_var_binds) - non_repeater_count, 0)
-        if repeater_count:
-            max_repetitions = min(
-                max_repetitions, (self.max_varbinds - non_repeater_count) // repeater_count
+        repetitions = max(int(v2c.apiBulkPDU.get_max_repetitions(pdu)), 0)
+        original = v2c.apiPDU.get_varbinds(pdu)
+        requested = original[: self.max_varbinds]
+        fixed = min(non_repeaters, len(requested))
+        repeating = len(requested) - fixed
+        if repeating:
+            repetitions = min(repetitions, (self.max_varbinds - fixed) // repeating)
+        v2c.apiBulkPDU.set_non_repeaters(pdu, fixed)
+        v2c.apiBulkPDU.set_max_repetitions(pdu, repetitions)
+        v2c.apiPDU.set_varbinds(pdu, requested)
+
+        instrumentation = self.snmpContext.get_mib_instrum(context_name)
+        context_data = {
+            "snmpEngine": snmp_engine,
+            "acFun": self.verify_access,
+            "cbCtx": self.cbCtx,
+        }
+        try:
+            result = (
+                instrumentation.read_next_variables(*requested[:fixed], **context_data)
+                if fixed
+                else []
             )
-        v2c.apiBulkPDU.set_non_repeaters(pdu, non_repeater_count)
-        v2c.apiBulkPDU.set_max_repetitions(pdu, max_repetitions)
-        v2c.apiPDU.set_varbinds(pdu, request_var_binds)
-        if non_repeater_count == 0 and (max_repetitions == 0 or repeater_count == 0):
-            self.send_varbinds(snmp_engine, state_reference, 0, 0, [])
+            cursors = requested[fixed:]
+            for _ in range(repetitions if repeating else 0):
+                row = instrumentation.read_next_variables(
+                    *cursors, index_offset=fixed, **context_data
+                )
+                result.extend(row)
+                cursors = row
+            # A valid zero-repetition GETBULK has an empty response.
+            self.send_varbinds(snmp_engine, state_reference, 0, 0, result)
             self.release_state_information(state_reference)
-            return
-        super().handle_management_operation(
-            snmp_engine,
-            state_reference,
-            context_name,
-            pdu,
-        )
+        except smi_error.GenError as exc:
+            # Echo the original request, even when GETBULK processing was clamped.
+            self._send_gen_error(snmp_engine, state_reference, pdu, exc, original)
 
 
 class ManagedUdpTransport(udp.UdpAsyncioTransport):
     def __init__(self) -> None:
         super().__init__()
         self._closed = asyncio.Event()
+        self._request_audit: RequestAudit | None = None
+        self._unavailable = False
 
     async def wait_ready(self) -> None:
         if self._lport is None:
@@ -182,7 +250,30 @@ class ManagedUdpTransport(udp.UdpAsyncioTransport):
         super().connection_lost(exc)
         self._closed.set()
 
+    def send_message(self, outgoing_message: bytes, transport_address: Any) -> Any:
+        if self._unavailable:
+            if self._request_audit is not None:
+                self._request_audit.response(
+                    outgoing_message, transport_address, sent=False, suppressed=True
+                )
+            return None
+        try:
+            result = super().send_message(outgoing_message, transport_address)
+        except Exception:
+            if self._request_audit is not None:
+                self._request_audit.response(outgoing_message, transport_address, sent=False)
+            raise
+        if self._request_audit is not None:
+            self._request_audit.response(outgoing_message, transport_address, sent=True)
+        return result
+
     def datagram_received(self, datagram: bytes, transport_address: Any) -> None:
+        if self._request_audit is not None:
+            self._request_audit.received(datagram, transport_address)
+        if self._unavailable:
+            if self._request_audit is not None:
+                self._request_audit.suppress_datagram(datagram, transport_address)
+            return
         if self._callback_function is None:
             super().datagram_received(datagram, transport_address)
             return
@@ -231,44 +322,104 @@ def encode_value(metric: Metric) -> Any:
 
 
 class StoreInstrumentation(AbstractMibInstrumController):
-    def __init__(self, store: MetricStore) -> None:
+    def __init__(self, store: MetricStore, oid_responses: dict[str, str] | None = None) -> None:
         self.store = store
+        self.oid_responses = {
+            ObjectIdentifier.parse(oid): mode for oid, mode in (oid_responses or {}).items()
+        }
+
+    def _mode(self, oid: ObjectIdentifier) -> str:
+        return self.oid_responses.get(oid, "normal")
+
+    def _missing_value(self, oid: ObjectIdentifier) -> Any:
+        for metric in self.store.snapshot():
+            object_prefix = metric.oid.parts[:-1]
+            if (
+                len(object_prefix) >= 2
+                and oid.parts[: len(object_prefix)] == object_prefix
+                and self._mode(metric.oid) != "noSuchObject"
+            ):
+                return exval.noSuchInstance
+        return exval.noSuchObject
 
     def read_variables(
         self, *var_binds: tuple[Any, Any], **context_data: Any
     ) -> list[tuple[Any, Any]]:
         result: list[tuple[Any, Any]] = []
-        for name, _ in var_binds:
+        for index, (name, _) in enumerate(var_binds):
             oid = ObjectIdentifier(tuple(int(part) for part in name))
             metric = self.store.get(oid)
-            result.append((name, encode_value(metric) if metric else exval.noSuchObject))
+            if metric is None:
+                value = self._missing_value(oid)
+            else:
+                mode = self._mode(oid)
+                if mode == "genErr":
+                    raise SimulatedOidGenError(idx=index)
+                if mode == "noSuchObject":
+                    value = exval.noSuchObject
+                elif mode == "noSuchInstance":
+                    value = exval.noSuchInstance
+                else:
+                    value = encode_value(metric)
+            result.append((name, value))
         return result
 
     def read_next_variables(
-        self,
-        *var_binds: tuple[Any, Any],
-        **context_data: Any,
+        self, *var_binds: tuple[Any, Any], **context_data: Any
     ) -> list[tuple[Any, Any]]:
         result: list[tuple[Any, Any]] = []
-        for name, _ in var_binds:
-            oid = ObjectIdentifier(tuple(int(part) for part in name))
-            metric = self.store.get_next(oid)
-            if metric is None:
-                result.append((name, exval.endOfMibView))
-            else:
+        index_offset = int(context_data.get("index_offset", 0))
+        for index, (name, _) in enumerate(var_binds):
+            cursor = ObjectIdentifier(tuple(int(part) for part in name))
+            while True:
+                metric = self.store.get_next(cursor)
+                if metric is None:
+                    result.append((name, exval.endOfMibView))
+                    break
+                mode = self._mode(metric.oid)
+                if mode == "genErr":
+                    raise SimulatedOidGenError(idx=index + index_offset)
+                if mode in {"noSuchObject", "noSuchInstance"}:
+                    cursor = metric.oid
+                    continue
                 result.append((rfc1902.ObjectName(metric.oid.parts), encode_value(metric)))
+                break
         return result
 
 
 class SnmpAgent:
-    def __init__(self, host: str, port: int, community: str, store: MetricStore) -> None:
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        community: str,
+        store: MetricStore,
+        oid_responses: dict[str, str] | None = None,
+        request_counters: RequestCounters | None = None,
+    ) -> None:
+        self.request_counters = request_counters
         self.host = host
         self.port = port
         self.community = community
         self.store = store
+        self.oid_responses = oid_responses or {}
         self._lifecycle_lock = asyncio.Lock()
         self._engine: engine.SnmpEngine | None = None
         self._transport: ManagedUdpTransport | None = None
+        self._unavailable = False
+
+    @property
+    def unavailable(self) -> bool:
+        return self._unavailable
+
+    def set_unavailable(self, unavailable: bool) -> None:
+        """Do not close the UDP socket: clients must observe real timeouts."""
+        if self._unavailable == unavailable:
+            return
+        self._unavailable = unavailable
+        if self._transport is not None:
+            self._transport._unavailable = unavailable
+        LOGGER.info("SNMP availability changed: %s", "unavailable" if unavailable else "available")
 
     async def start(self) -> None:
         async with self._lifecycle_lock:
@@ -282,6 +433,11 @@ class SnmpAgent:
                 snmp_engine.security_models.pop(1, None)
                 snmp_engine.message_processing_subsystems[1] = V2cMessageProcessingModel()
                 transport = ManagedUdpTransport()
+                transport._request_audit = RequestAudit(  # shared by CLI and GUI
+                    encode_octet_string(self.community),
+                    V2cMessage,
+                    counters=self.request_counters,
+                )
                 transport.open_server_mode(sock=server_socket)
                 config.add_transport(
                     snmp_engine,
@@ -303,7 +459,9 @@ class SnmpAgent:
                     )
                 snmp_context = context.SnmpContext(snmp_engine)
                 snmp_context.unregister_context_name(b"")
-                snmp_context.register_context_name(b"", StoreInstrumentation(self.store))
+                snmp_context.register_context_name(
+                    b"", StoreInstrumentation(self.store, self.oid_responses)
+                )
                 community = encode_octet_string(self.community)
                 V2cGetCommandResponder(snmp_engine, snmp_context, community=community)
                 V2cNextCommandResponder(snmp_engine, snmp_context, community=community)
@@ -316,6 +474,7 @@ class SnmpAgent:
                 raise
             self._engine = snmp_engine
             self._transport = transport
+            self._unavailable = False
 
     async def stop(self) -> None:
         async with self._lifecycle_lock:
@@ -324,5 +483,8 @@ class SnmpAgent:
                 self._engine.close_dispatcher()
                 self._engine = None
                 self._transport = None
+                self._unavailable = False
                 if transport is not None:
                     await transport.wait_closed()
+                    if transport._request_audit is not None:
+                        transport._request_audit.close()
