@@ -13,7 +13,8 @@ from pysnmp.entity.rfc3413 import cmdrsp, context
 from pysnmp.proto import rfc1901, rfc1902, rfc1905
 from pysnmp.proto.api import v2c
 from pysnmp.proto.mpmod.rfc2576 import SnmpV2cMessageProcessingModel
-from pysnmp.smi import error as smi_error, exval
+from pysnmp.smi import error as smi_error
+from pysnmp.smi import exval
 from pysnmp.smi.instrum import AbstractMibInstrumController
 
 from ..domain.metric import Metric
@@ -138,8 +139,11 @@ class SimulatedErrorResponder:
         self.release_state_information(state_reference)
 
     def handle_management_operation(
-        self, snmp_engine: engine.SnmpEngine, state_reference: Any,
-        context_name: Any, pdu: Any,
+        self,
+        snmp_engine: engine.SnmpEngine,
+        state_reference: Any,
+        context_name: Any,
+        pdu: Any,
     ) -> None:
         try:
             super().handle_management_operation(  # type: ignore[misc]

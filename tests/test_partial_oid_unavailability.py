@@ -7,13 +7,14 @@ import logging
 import socket
 
 import pytest
-from pydantic import ValidationError
 from pyasn1.codec.ber import decoder, encoder
+from pydantic import ValidationError
 from pysnmp.proto import rfc1902
 from pysnmp.proto.api import v2c
-from pysnmp.smi import error as smi_error, exval
+from pysnmp.smi import error as smi_error
+from pysnmp.smi import exval
 
-from snmp_emulator.adapters.pysnmp_agent import SnmpAgent, StoreInstrumentation, V2cMessage
+from snmp_emulator.adapters.pysnmp_agent import StoreInstrumentation, V2cMessage
 from snmp_emulator.application import EmulatorApplication
 from snmp_emulator.config import EmulatorConfig
 from snmp_emulator.json_config import DeviceConfig, ScenarioDocument, bind_config
@@ -43,9 +44,7 @@ def make_config(modes: dict[str, str]) -> EmulatorConfig:
             "duration": 2.0,
             "update_interval": 0.1,
             "rules": [] if modes else [{"type": "constant", "oid": A, "value": 1}],
-            "oid_responses": [
-                {"oid": oid, "mode": mode} for oid, mode in modes.items()
-            ],
+            "oid_responses": [{"oid": oid, "mode": mode} for oid, mode in modes.items()],
         }
     )
     return bind_config(device, scenario)
@@ -245,9 +244,7 @@ def test_missing_instance_of_known_scalar():
 
 def test_generr_instrumentation_raises_with_correct_index():
     config = make_config({C: "genErr"})
-    instrument = StoreInstrumentation(
-        EmulatorApplication(config).store, {C: "genErr"}
-    )
+    instrument = StoreInstrumentation(EmulatorApplication(config).store, {C: "genErr"})
     with pytest.raises(smi_error.GenError) as failure:
         instrument.read_variables(
             (rfc1902.ObjectName(A), rfc1902.Null("")),
