@@ -63,6 +63,17 @@ JSON_PROFILES = {
             "status": "busy",
         },
     ),
+    "variable-load": (
+        "device-10.json",
+        {
+            "cpu_usage": 21,
+            "memory_usage": 38,
+            "temperature": 36,
+            "inbound_mbps": 110,
+            "outbound_mbps": 80,
+            "active_flows": 210,
+        },
+    ),
 }
 JSON_SCENARIOS = tuple(JSON_PROFILES)
 

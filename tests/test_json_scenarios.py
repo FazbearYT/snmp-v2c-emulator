@@ -104,6 +104,10 @@ def configuration(rule: dict, duration: float = 1, interval: float = 0.1):
             {"type": "step", "step": -3, "limit": -1},
             [("0", 10), ("0.1", 7), ("0.3", 1), ("0.4", -1), ("2", -1)],
         ),
+        (
+            {"type": "sequence", "values": [11, 30, 16, 45, 20]},
+            [("0", 11), ("0.099", 11), ("0.1", 30), ("0.2", 16), ("0.3", 45), ("2", 20)],
+        ),
     ],
 )
 def test_rules_follow_update_grid_and_limits(rule: dict, checks: list) -> None:

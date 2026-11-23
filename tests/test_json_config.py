@@ -151,6 +151,7 @@ def test_rejects_invalid_scenario_fields(field: str, value: object) -> None:
         {"type": "step", "oid": OID, "step": 1, "limit": 5},
         {"type": "step", "oid": OID, "step": -1, "limit": 20},
         {"type": "constant", "oid": "1.3.99", "value": 1},
+        {"type": "sequence", "oid": OID, "values": [10, "invalid"]},
     ],
 )
 def test_rejects_invalid_links_and_rule_values(rule: dict) -> None:
@@ -174,6 +175,7 @@ def test_rejects_invalid_links_and_rule_values(rule: dict) -> None:
         {"type": "step", "oid": OID, "step": True, "limit": 20},
         {"type": "step", "oid": OID, "step": 1, "limit": 20, "extra": 1},
         {"type": "ramp", "oid": OID},
+        {"type": "sequence", "oid": OID, "values": []},
     ],
 )
 def test_rejects_invalid_rule_schema(rule: dict) -> None:
