@@ -25,7 +25,10 @@ def free_port():
 
 def request(pdu_type, oid=OID, *, community=b"public", request_id=71):
     pdu = pdu_type()
-    v2c.apiPDU.set_defaults(pdu)
+    if pdu_type is v2c.GetBulkRequestPDU:
+        v2c.apiBulkPDU.set_defaults(pdu)
+    else:
+        v2c.apiPDU.set_defaults(pdu)
     v2c.apiPDU.set_request_id(pdu, request_id)
     if pdu_type is v2c.GetBulkRequestPDU:
         v2c.apiBulkPDU.set_non_repeaters(pdu, 0)
