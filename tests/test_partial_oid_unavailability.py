@@ -42,7 +42,7 @@ def make_config(modes: dict[str, str]) -> EmulatorConfig:
         {
             "duration": 2.0,
             "update_interval": 0.1,
-            "rules": [],
+            "rules": [] if modes else [{"type": "constant", "oid": A, "value": 1}],
             "oid_responses": [
                 {"oid": oid, "mode": mode} for oid, mode in modes.items()
             ],
