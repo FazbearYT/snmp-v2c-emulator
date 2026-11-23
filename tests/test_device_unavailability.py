@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import socket
+import time
 
 import pytest
 from pydantic import ValidationError
@@ -21,6 +23,7 @@ from pysnmp.hlapi.v3arch.asyncio import (
 
 from snmp_emulator.application import EmulatorApplication
 from snmp_emulator.config import EmulatorConfig
+from snmp_emulator.gui_controller import PanelController
 from snmp_emulator.json_config import DeviceConfig, ScenarioDocument, bind_config
 
 OID = "1.3.6.1.4.1.55555.1.0"
@@ -186,3 +189,56 @@ def test_outage_only_scenario_has_no_metric_actions():
     assert config.unavailability is not None
     assert config.unavailability.at == 0.4
     assert config.unavailability.duration == 0.8
+
+
+def test_gui_panel_displays_temporary_unavailability(tmp_path):
+    from snmp_emulator.gui_controller import PROFILES
+
+    assert any("Недоступность" in name for name in PROFILES)
+
+    port = reserve_port()
+    device = tmp_path / "device.json"
+    scenario = tmp_path / "outage.json"
+    device.write_text(
+        json.dumps(
+            {
+                "agent": {"host": "127.0.0.1", "port": port},
+                "metrics": [
+                    {"name": "cpu", "oid": OID, "type": "Integer32", "initial": 15}
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    scenario.write_text(
+        json.dumps(
+            {
+                "duration": 1.0,
+                "update_interval": 0.05,
+                "rules": [],
+                "unavailability": {"at": 0.2, "duration": 0.5},
+            }
+        ),
+        encoding="utf-8",
+    )
+    panel = PanelController()
+    assert panel.start(device, scenario)
+    seen = []
+    try:
+        deadline = time.monotonic() + 4
+        while time.monotonic() < deadline:
+            state = panel.snapshot().state
+            if state not in seen:
+                seen.append(state)
+            if "unavailable" in seen and state == "running":
+                break
+            time.sleep(0.01)
+        assert "unavailable" in seen
+        assert "running" in seen
+        assert panel.snapshot().metrics[0].value == 15
+    finally:
+        panel.stop()
+        deadline = time.monotonic() + 4
+        while panel.active and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert not panel.active
