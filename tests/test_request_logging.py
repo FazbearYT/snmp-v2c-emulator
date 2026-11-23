@@ -132,9 +132,7 @@ async def test_audit_clears_pending_on_restart(caplog):
 @pytest.mark.asyncio
 async def test_audit_logs_too_big_response(caplog):
     port = free_port()
-    large = Metric(
-        "payload", ObjectIdentifier.parse(OID), SnmpDataType.OCTET_STRING, "x" * 65535
-    )
+    large = Metric("payload", ObjectIdentifier.parse(OID), SnmpDataType.OCTET_STRING, "x" * 65535)
     agent = SnmpAgent("127.0.0.1", port, "public", MetricStore([large]))
     caplog.set_level(logging.INFO, logger="snmp_emulator.adapters.request_audit")
     await agent.start()
