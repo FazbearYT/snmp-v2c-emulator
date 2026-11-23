@@ -162,7 +162,7 @@ class ScenarioConfig(BaseModel):
         allow_inf_nan=False,
         strict=True,
     )
-    actions: list[ActionConfig] = Field(min_length=1)
+    actions: list[ActionConfig] = Field(default_factory=list)
 
 
 class DeviceUnavailabilityConfig(BaseModel):
@@ -220,6 +220,8 @@ class EmulatorConfig(BaseModel):
         if len(scenario_names) != len(set(scenario_names)):
             raise ValueError("scenario names must be unique")
         for scenario in self.scenarios:
+            if not scenario.actions and self.unavailability is None:
+                raise ValueError("scenario requires at least one action")
             action_moments: set[tuple[str, float]] = set()
             for action in scenario.actions:
                 moment = (action.metric, action.at)
