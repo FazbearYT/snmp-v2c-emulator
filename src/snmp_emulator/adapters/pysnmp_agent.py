@@ -20,6 +20,7 @@ from ..domain.metric import Metric
 from ..domain.oid import ObjectIdentifier
 from ..domain.store import MetricStore
 from ..domain.types import SnmpDataType, encode_octet_string
+from .request_audit import RequestAudit
 
 LOGGER = logging.getLogger(__name__)
 MAX_UDP_PAYLOAD_BYTES = 65507
@@ -169,6 +170,7 @@ class ManagedUdpTransport(udp.UdpAsyncioTransport):
     def __init__(self) -> None:
         super().__init__()
         self._closed = asyncio.Event()
+        self._request_audit: RequestAudit | None = None
 
     async def wait_ready(self) -> None:
         if self._lport is None:
@@ -182,7 +184,20 @@ class ManagedUdpTransport(udp.UdpAsyncioTransport):
         super().connection_lost(exc)
         self._closed.set()
 
+    def send_message(self, outgoing_message: bytes, transport_address: Any) -> Any:
+        try:
+            result = super().send_message(outgoing_message, transport_address)
+        except Exception:
+            if self._request_audit is not None:
+                self._request_audit.response(outgoing_message, transport_address, sent=False)
+            raise
+        if self._request_audit is not None:
+            self._request_audit.response(outgoing_message, transport_address, sent=True)
+        return result
+
     def datagram_received(self, datagram: bytes, transport_address: Any) -> None:
+        if self._request_audit is not None:
+            self._request_audit.received(datagram, transport_address)
         if self._callback_function is None:
             super().datagram_received(datagram, transport_address)
             return
@@ -282,6 +297,9 @@ class SnmpAgent:
                 snmp_engine.security_models.pop(1, None)
                 snmp_engine.message_processing_subsystems[1] = V2cMessageProcessingModel()
                 transport = ManagedUdpTransport()
+                transport._request_audit = RequestAudit(  # shared by CLI and GUI
+                    encode_octet_string(self.community), V2cMessage
+                )
                 transport.open_server_mode(sock=server_socket)
                 config.add_transport(
                     snmp_engine,
@@ -326,3 +344,5 @@ class SnmpAgent:
                 self._transport = None
                 if transport is not None:
                     await transport.wait_closed()
+                    if transport._request_audit is not None:
+                        transport._request_audit.close()
