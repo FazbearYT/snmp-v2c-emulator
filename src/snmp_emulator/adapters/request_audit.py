@@ -7,9 +7,11 @@ from __future__ import annotations
 
 import logging
 from collections import OrderedDict, deque
+from collections.abc import Callable
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Callable
+from typing import Any
 
 from pyasn1.codec.ber import decoder
 from pysnmp.proto.api import v2c
@@ -114,10 +116,8 @@ class RequestAudit:
         key = self._key((record.address, record.port), record.request_id)
         queue = self._by_key.get(key)
         if queue is not None:
-            try:
+            with suppress(ValueError):
                 queue.remove(token)
-            except ValueError:
-                pass
             if not queue:
                 del self._by_key[key]
         LOGGER.info(
