@@ -129,9 +129,15 @@ class SimulatedErrorResponder:
     """Translate simulated instrumentation failures into SNMP genErr responses."""
 
     def _send_gen_error(
-        self, snmp_engine: engine.SnmpEngine, state_reference: Any, pdu: Any, error: Any
+        self,
+        snmp_engine: engine.SnmpEngine,
+        state_reference: Any,
+        pdu: Any,
+        error: Any,
+        original: list[tuple[Any, Any]] | None = None,
     ) -> None:
-        original = v2c.apiPDU.get_varbinds(pdu)
+        if original is None:
+            original = v2c.apiPDU.get_varbinds(pdu)
         index = int(error["idx"]) + 1
         if not 1 <= index <= len(original):
             index = 1
@@ -179,7 +185,8 @@ class V2cBulkCommandResponder(
     ) -> None:
         non_repeaters = max(int(v2c.apiBulkPDU.get_non_repeaters(pdu)), 0)
         repetitions = max(int(v2c.apiBulkPDU.get_max_repetitions(pdu)), 0)
-        requested = v2c.apiPDU.get_varbinds(pdu)[: self.max_varbinds]
+        original = v2c.apiPDU.get_varbinds(pdu)
+        requested = original[: self.max_varbinds]
         fixed = min(non_repeaters, len(requested))
         repeating = len(requested) - fixed
         if repeating:
@@ -211,7 +218,9 @@ class V2cBulkCommandResponder(
             self.send_varbinds(snmp_engine, state_reference, 0, 0, result)
             self.release_state_information(state_reference)
         except smi_error.GenError as exc:
-            self._send_gen_error(snmp_engine, state_reference, pdu, exc)
+            # The error response must echo the complete original request, not
+            # the truncated GETBULK working list or normalized parameters.
+            self._send_gen_error(snmp_engine, state_reference, pdu, exc, original)
 
 
 class ManagedUdpTransport(udp.UdpAsyncioTransport):
