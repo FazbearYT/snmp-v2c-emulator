@@ -42,10 +42,9 @@ async def malformed_traffic(port):
     loop = asyncio.get_running_loop()
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sender:
         sender.setblocking(False)
-        for _ in range(40):
-            for _ in range(10):
-                payload = generator.randbytes(generator.randrange(1, 513))
-                await loop.sock_sendto(sender, payload, ("127.0.0.1", port))
+        for _ in range(400):
+            payload = generator.randbytes(generator.randrange(1, 513))
+            await loop.sock_sendto(sender, payload, ("127.0.0.1", port))
             await asyncio.sleep(0.001)
 
 
