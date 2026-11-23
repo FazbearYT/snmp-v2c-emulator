@@ -35,8 +35,11 @@ def reserve_port() -> int:
 def configuration(*, port: int | None = None, duration: float = 0.3):
     device = DeviceConfig.model_validate(
         {
-            "agent": {"host": "127.0.0.1", "port": port or reserve_port(),
-                      "community": "super-secret-value"},
+            "agent": {
+                "host": "127.0.0.1",
+                "port": port or reserve_port(),
+                "community": "super-secret-value",
+            },
             "metrics": [{"name": "cpu", "oid": OID, "type": "Integer32", "initial": 15}],
         }
     )
@@ -80,9 +83,7 @@ async def terminate(task: asyncio.Task) -> None:
 async def test_report_after_scenario_completion_and_stop(tmp_path: Path):
     path = tmp_path / "results" / "completed.json"
     config = configuration(duration=0.2)
-    application = EmulatorApplication(
-        config, scenario_id="stable", report_path=path
-    )
+    application = EmulatorApplication(config, scenario_id="stable", report_path=path)
     task = asyncio.create_task(application.run())
     await asyncio.wait_for(application.started.wait(), 2)
     await get_response(config.agent.port)
@@ -125,9 +126,7 @@ async def test_handled_bind_failure_saves_failed_report(tmp_path: Path):
     path = tmp_path / "failed.json"
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as busy:
         busy.bind(("127.0.0.1", port))
-        application = EmulatorApplication(
-            config, scenario_id="failed", report_path=path
-        )
+        application = EmulatorApplication(config, scenario_id="failed", report_path=path)
         with pytest.raises(OSError):
             await application.run()
     report = json.loads(path.read_text(encoding="utf-8"))
@@ -193,9 +192,15 @@ def test_build_report_has_no_raw_log_and_limits_errors():
         stats.record_error("safe failure")
     now = utc_now()
     report = build_report(
-        config, stats, scenario_id="sample", started=now, ended=now,
-        initial_values={"cpu": 15}, final_values={"cpu": 15},
-        scenario_completed=False, failed=True,
+        config,
+        stats,
+        scenario_id="sample",
+        started=now,
+        ended=now,
+        initial_values={"cpu": 15},
+        final_values={"cpu": 15},
+        scenario_completed=False,
+        failed=True,
     )
     assert report["outcome"] == "failed"
     assert len(report["errors"]) == 32
@@ -223,9 +228,7 @@ async def test_unavailable_requests_counted_without_responses(tmp_path: Path):
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
             sock.bind(("127.0.0.1", 0))
             sock.setblocking(False)
-            await loop.sock_sendto(
-                sock, snmp_get(), ("127.0.0.1", config.agent.port)
-            )
+            await loop.sock_sendto(sock, snmp_get(), ("127.0.0.1", config.agent.port))
         await asyncio.sleep(0.05)
     finally:
         await terminate(task)
@@ -239,9 +242,15 @@ def test_report_persistence_emits_no_credentials(caplog, tmp_path):
     stats = RunStatistics()
     now = utc_now()
     document = build_report(
-        config, stats, scenario_id="example", started=now, ended=now,
-        initial_values={}, final_values={},
-        scenario_completed=True, failed=False,
+        config,
+        stats,
+        scenario_id="example",
+        started=now,
+        ended=now,
+        initial_values={},
+        final_values={},
+        scenario_completed=True,
+        failed=False,
     )
     path = tmp_path / "output.json"
     with caplog.at_level(logging.INFO):

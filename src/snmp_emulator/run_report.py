@@ -46,12 +46,8 @@ class RequestCounters:
             self.sent += 1
             if simulated_generr and error_status == 5:
                 self.simulated_errors += 1
-            self.no_such_object += sum(
-                item.endswith(":noSuchObject") for item in exceptions
-            )
-            self.no_such_instance += sum(
-                item.endswith(":noSuchInstance") for item in exceptions
-            )
+            self.no_such_object += sum(item.endswith(":noSuchObject") for item in exceptions)
+            self.no_such_instance += sum(item.endswith(":noSuchInstance") for item in exceptions)
         elif reason == "device_unavailable":
             self.intentionally_suppressed += 1
         else:
@@ -120,8 +116,12 @@ def save_report(path: Path, document: dict[str, Any]) -> None:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile(
-            mode="w", encoding="utf-8", dir=path.parent,
-            prefix=f".{path.name}.", suffix=".tmp", delete=False,
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
         ) as output:
             temporary = Path(output.name)
             json.dump(document, output, ensure_ascii=False, indent=2, allow_nan=False)
