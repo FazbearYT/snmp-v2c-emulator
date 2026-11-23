@@ -16,12 +16,11 @@ from pysnmp.proto.mpmod.rfc2576 import SnmpV2cMessageProcessingModel
 from pysnmp.smi import exval
 from pysnmp.smi.instrum import AbstractMibInstrumController
 
-from .request_audit import RequestAudit
-
 from ..domain.metric import Metric
 from ..domain.oid import ObjectIdentifier
 from ..domain.store import MetricStore
 from ..domain.types import SnmpDataType, encode_octet_string
+from .request_audit import RequestAudit
 
 LOGGER = logging.getLogger(__name__)
 MAX_UDP_PAYLOAD_BYTES = 65507
