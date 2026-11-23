@@ -1,11 +1,14 @@
-name: CI
+name: CI / main full
 
 env:
   UV_VERSION: "0.12.24"
 
 on:
   push:
+    branches: [main]
   pull_request:
+    branches: [main]
+    types: [opened, reopened, synchronize, ready_for_review, converted_to_draft]
   workflow_dispatch:
 
 permissions:
@@ -62,7 +65,7 @@ jobs:
       - name: Check formatting
         run: uv run --locked --python "3.13" --all-extras ruff format --check .
       - name: Audit workflow security
-        run: uv run --locked --python "3.13" --all-extras zizmor .github/workflows/ci.yml
+        run: uv run --locked --python "3.13" --all-extras zizmor .github/workflows/*.yml
       - name: Audit Python dependencies
         run: |
           uv export --quiet --locked --all-extras --no-emit-project \
