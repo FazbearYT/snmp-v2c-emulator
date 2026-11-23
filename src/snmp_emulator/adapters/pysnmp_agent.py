@@ -171,6 +171,7 @@ class ManagedUdpTransport(udp.UdpAsyncioTransport):
         super().__init__()
         self._closed = asyncio.Event()
         self._request_audit: RequestAudit | None = None
+        self._unavailable = False
 
     async def wait_ready(self) -> None:
         if self._lport is None:
@@ -185,6 +186,12 @@ class ManagedUdpTransport(udp.UdpAsyncioTransport):
         self._closed.set()
 
     def send_message(self, outgoing_message: bytes, transport_address: Any) -> Any:
+        if self._unavailable:
+            if self._request_audit is not None:
+                self._request_audit.response(
+                    outgoing_message, transport_address, sent=False, suppressed=True
+                )
+            return None
         try:
             result = super().send_message(outgoing_message, transport_address)
         except Exception:
@@ -198,6 +205,10 @@ class ManagedUdpTransport(udp.UdpAsyncioTransport):
     def datagram_received(self, datagram: bytes, transport_address: Any) -> None:
         if self._request_audit is not None:
             self._request_audit.received(datagram, transport_address)
+        if self._unavailable:
+            if self._request_audit is not None:
+                self._request_audit.suppress_datagram(datagram, transport_address)
+            return
         if self._callback_function is None:
             super().datagram_received(datagram, transport_address)
             return
@@ -284,6 +295,20 @@ class SnmpAgent:
         self._lifecycle_lock = asyncio.Lock()
         self._engine: engine.SnmpEngine | None = None
         self._transport: ManagedUdpTransport | None = None
+        self._unavailable = False
+
+    @property
+    def unavailable(self) -> bool:
+        return self._unavailable
+
+    def set_unavailable(self, unavailable: bool) -> None:
+        """Do not close the UDP socket: clients must observe real timeouts."""
+        if self._unavailable == unavailable:
+            return
+        self._unavailable = unavailable
+        if self._transport is not None:
+            self._transport._unavailable = unavailable
+        LOGGER.info("SNMP availability changed: %s", "unavailable" if unavailable else "available")
 
     async def start(self) -> None:
         async with self._lifecycle_lock:
@@ -334,6 +359,7 @@ class SnmpAgent:
                 raise
             self._engine = snmp_engine
             self._transport = transport
+            self._unavailable = False
 
     async def stop(self) -> None:
         async with self._lifecycle_lock:
@@ -342,6 +368,7 @@ class SnmpAgent:
                 self._engine.close_dispatcher()
                 self._engine = None
                 self._transport = None
+                self._unavailable = False
                 if transport is not None:
                     await transport.wait_closed()
                     if transport._request_audit is not None:
