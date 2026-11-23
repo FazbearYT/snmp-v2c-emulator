@@ -3,10 +3,19 @@ name: CI
 env:
   UV_VERSION: "0.12.24"
 
+# Branch pushes are validated via their pull requests; do not run the same
+# test matrix twice for a feature branch update.
 on:
   push:
+    branches: [develop]
   pull_request:
+    branches: [develop]
   workflow_dispatch:
+
+# Replace superseded PR runs while preserving develop and manual runs.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
