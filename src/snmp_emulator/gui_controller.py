@@ -13,6 +13,7 @@ from .application import EmulatorApplication
 from .config import ConfigurationError
 from .domain.metric import Metric
 from .json_config import load_json_config
+from .run_report import default_report_path
 
 LOGGER = logging.getLogger(__name__)
 
@@ -105,7 +106,15 @@ class PanelController:
         try:
             config = load_json_config(device, scenario)
             if not self._stop.is_set():
-                asyncio.run(self._observe(EmulatorApplication(config)))
+                asyncio.run(
+                    self._observe(
+                        EmulatorApplication(
+                            config,
+                            scenario_id=scenario.stem,
+                            report_path=default_report_path(scenario),
+                        )
+                    )
+                )
         except ConfigurationError as exc:
             LOGGER.error("configuration error: %s", exc)
             self._publish(state="error", error=str(exc))

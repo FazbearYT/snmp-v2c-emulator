@@ -13,6 +13,7 @@ from .application import EmulatorApplication
 from .config import ConfigurationError, load_config
 from .json_config import load_json_config
 from .logging_config import configure_logging
+from .run_report import default_report_path
 
 LOGGER = logging.getLogger(__name__)
 
@@ -24,6 +25,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--device-config", type=Path, help="path to a JSON device configuration")
     parser.add_argument("--scenario", type=Path, help="path to a JSON scenario")
     parser.add_argument("--check-config", action="store_true")
+    parser.add_argument("--report-file", type=Path, help="JSON report destination")
+
     parser.add_argument(
         "--log-level",
         choices=("DEBUG", "INFO", "WARNING", "ERROR"),
@@ -88,7 +91,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"configuration is valid: {len(config.metrics)} metrics")
         return 0
     try:
-        asyncio.run(run_application(EmulatorApplication(config)))
+        source = args.scenario if args.scenario is not None else args.config
+        path = args.report_file or default_report_path(source)
+        destination = path.resolve()
+        for input_path in (args.config, args.device_config, args.scenario):
+            if input_path is not None and (
+                destination == input_path.resolve()
+                or (destination.exists() and destination.samefile(input_path))
+            ):
+                LOGGER.error("report destination must differ from input configuration: %s", path)
+                return 2
+        application = EmulatorApplication(config)
+        if hasattr(application, "configure_report"):
+            application.configure_report(scenario_id=source.stem, path=path)
+        asyncio.run(run_application(application))
     except KeyboardInterrupt:
         pass
     except OSError as exc:

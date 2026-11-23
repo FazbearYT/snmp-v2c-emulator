@@ -95,6 +95,30 @@ def test_runs_json_application(monkeypatch) -> None:
     assert received[0].duration == 20
 
 
+@pytest.mark.parametrize("input_name", ["yaml", "device", "scenario"])
+def test_rejects_report_destination_that_matches_input(
+    input_name, monkeypatch, tmp_path, caplog
+) -> None:
+    def unexpected_application(config):
+        pytest.fail("report destination must be validated before creating the application")
+
+    monkeypatch.setattr(cli, "EmulatorApplication", unexpected_application)
+    inputs = {"yaml": EXAMPLE_CONFIG, "device": JSON_DEVICE, "scenario": JSON_SCENARIO}
+    original = inputs[input_name].read_bytes()
+    target = tmp_path / inputs[input_name].name
+    target.write_bytes(original)
+    inputs[input_name] = target
+    if input_name == "yaml":
+        args = ["--config", str(target)]
+    else:
+        args = ["--device-config", str(inputs["device"]), "--scenario", str(inputs["scenario"])]
+
+    monkeypatch.chdir(tmp_path)
+    assert cli.main([*args, "--report-file", target.name]) == 2
+    assert "report destination must differ from input configuration" in caplog.text
+    assert target.read_bytes() == original
+
+
 def test_version_needs_no_configuration(capsys) -> None:
     with pytest.raises(SystemExit) as result:
         cli.main(["--version"])
