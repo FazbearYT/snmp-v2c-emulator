@@ -21,7 +21,8 @@ from ..domain.metric import Metric
 from ..domain.oid import ObjectIdentifier
 from ..domain.store import MetricStore
 from ..domain.types import SnmpDataType, encode_octet_string
-from .request_audit import RequestAudit
+from ..run_report import RequestCounters
+from .request_audit import SIMULATED_GENERR_RESPONSE, RequestAudit
 
 LOGGER = logging.getLogger(__name__)
 MAX_UDP_PAYLOAD_BYTES = 65507
@@ -125,8 +126,12 @@ class ResponseSizeGuard:
         )
 
 
+class SimulatedOidGenError(smi_error.GenError):
+    """A genErr explicitly triggered by an OID response mode."""
+
+
 class SimulatedErrorResponder:
-    """Translate simulated instrumentation failures into SNMP genErr responses."""
+    """Translate instrumentation failures into SNMP genErr responses."""
 
     def _send_gen_error(
         self,
@@ -141,7 +146,11 @@ class SimulatedErrorResponder:
         index = int(error["idx"]) + 1
         if not 1 <= index <= len(original):
             index = 1
-        self.send_varbinds(snmp_engine, state_reference, "genErr", index, original)
+        marker = SIMULATED_GENERR_RESPONSE.set(isinstance(error, SimulatedOidGenError))
+        try:
+            self.send_varbinds(snmp_engine, state_reference, "genErr", index, original)
+        finally:
+            SIMULATED_GENERR_RESPONSE.reset(marker)
         self.release_state_information(state_reference)
 
     def handle_management_operation(
@@ -218,8 +227,7 @@ class V2cBulkCommandResponder(
             self.send_varbinds(snmp_engine, state_reference, 0, 0, result)
             self.release_state_information(state_reference)
         except smi_error.GenError as exc:
-            # The error response must echo the complete original request, not
-            # the truncated GETBULK working list or normalized parameters.
+            # Echo the original request, even when GETBULK processing was clamped.
             self._send_gen_error(snmp_engine, state_reference, pdu, exc, original)
 
 
@@ -346,7 +354,7 @@ class StoreInstrumentation(AbstractMibInstrumController):
             else:
                 mode = self._mode(oid)
                 if mode == "genErr":
-                    raise smi_error.GenError(idx=index)
+                    raise SimulatedOidGenError(idx=index)
                 if mode == "noSuchObject":
                     value = exval.noSuchObject
                 elif mode == "noSuchInstance":
@@ -370,7 +378,7 @@ class StoreInstrumentation(AbstractMibInstrumController):
                     break
                 mode = self._mode(metric.oid)
                 if mode == "genErr":
-                    raise smi_error.GenError(idx=index + index_offset)
+                    raise SimulatedOidGenError(idx=index + index_offset)
                 if mode in {"noSuchObject", "noSuchInstance"}:
                     cursor = metric.oid
                     continue
@@ -387,7 +395,9 @@ class SnmpAgent:
         community: str,
         store: MetricStore,
         oid_responses: dict[str, str] | None = None,
+        request_counters: RequestCounters | None = None,
     ) -> None:
+        self.request_counters = request_counters
         self.host = host
         self.port = port
         self.community = community
@@ -424,7 +434,9 @@ class SnmpAgent:
                 snmp_engine.message_processing_subsystems[1] = V2cMessageProcessingModel()
                 transport = ManagedUdpTransport()
                 transport._request_audit = RequestAudit(  # shared by CLI and GUI
-                    encode_octet_string(self.community), V2cMessage
+                    encode_octet_string(self.community),
+                    V2cMessage,
+                    counters=self.request_counters,
                 )
                 transport.open_server_mode(sock=server_socket)
                 config.add_transport(
