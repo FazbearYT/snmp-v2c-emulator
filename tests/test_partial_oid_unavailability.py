@@ -261,7 +261,6 @@ def test_generr_instrumentation_raises_with_correct_index():
     assert int(failure.value["idx"]) == 1
 
 
-
 @pytest.mark.asyncio
 async def test_getbulk_error_echoes_original_varbinds_after_budget_clamp():
     """A failing GETBULK response retains every original request binding."""
@@ -275,9 +274,7 @@ async def test_getbulk_error_echoes_original_varbinds_after_budget_clamp():
         v2c.apiPDU.set_request_id(pdu, 109)
         v2c.apiBulkPDU.set_non_repeaters(pdu, 0)
         v2c.apiBulkPDU.set_max_repetitions(pdu, 1)
-        v2c.apiPDU.set_varbinds(
-            pdu, [(rfc1902.ObjectName(oid), rfc1902.Null("")) for oid in oids]
-        )
+        v2c.apiPDU.set_varbinds(pdu, [(rfc1902.ObjectName(oid), rfc1902.Null("")) for oid in oids])
         message = V2cMessage()
         v2c.apiMessage.set_defaults(message)
         v2c.apiMessage.set_community(message, b"public")
@@ -304,9 +301,7 @@ async def test_mixed_get_with_generr_preempts_per_binding_exceptions():
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
             sock.bind(("127.0.0.1", 0))
             sock.setblocking(False)
-            pdu = await exchange(
-                sock, config.agent.port, request(v2c.GetRequestPDU, [B, C, D])
-            )
+            pdu = await exchange(sock, config.agent.port, request(v2c.GetRequestPDU, [B, C, D]))
         assert int(v2c.apiPDU.get_error_status(pdu)) == 5
         assert int(v2c.apiPDU.get_error_index(pdu)) == 2
         assert [str(oid) for oid, _ in v2c.apiPDU.get_varbinds(pdu)] == [B, C, D]
