@@ -172,6 +172,9 @@ class DeviceUnavailabilityConfig(BaseModel):
     at: float = Field(ge=0, allow_inf_nan=False, strict=True)
     duration: float = Field(gt=0, allow_inf_nan=False, strict=True)
 
+    def ends_after(self, scenario_duration: float) -> bool:
+        return Decimal(str(self.at)) + Decimal(str(self.duration)) > Decimal(str(scenario_duration))
+
 
 class OidResponseConfig(BaseModel):
     """Simulated response behavior for a configured metric OID."""
@@ -222,7 +225,7 @@ class EmulatorConfig(BaseModel):
         if self.unavailability is not None:
             if self.duration is None:
                 raise ValueError("unavailability requires a finite scenario duration")
-            if self.unavailability.at + self.unavailability.duration > self.duration:
+            if self.unavailability.ends_after(self.duration):
                 raise ValueError("unavailability interval must end within scenario duration")
             for scenario in self.scenarios:
                 if scenario.repeat_every is not None:

@@ -78,13 +78,6 @@ class StepRule(OidRule):
 Rule = Annotated[ConstantRule | JumpRule | StepRule, Field(discriminator="type")]
 
 
-class UnavailabilityRule(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    at: Seconds
-    duration: PositiveSeconds
-
-
 class OidResponseRule(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -103,7 +96,7 @@ class ScenarioDocument(BaseModel):
     duration: PositiveSeconds
     update_interval: PositiveSeconds
     rules: list[Rule] = Field(default_factory=list)
-    unavailability: UnavailabilityRule | None = None
+    unavailability: DeviceUnavailabilityConfig | None = None
     oid_responses: list[OidResponseRule] = Field(default_factory=list)
 
     @model_validator(mode="after")
@@ -114,7 +107,7 @@ class ScenarioDocument(BaseModel):
         if len(mode_oids) != len(set(mode_oids)):
             raise ValueError("OID response configuration may contain only one mode per OID")
         if self.unavailability is not None:
-            if self.unavailability.at + self.unavailability.duration > self.duration:
+            if self.unavailability.ends_after(self.duration):
                 raise ValueError("unavailability interval must end within scenario duration")
             if any(not isinstance(rule, ConstantRule) for rule in self.rules):
                 raise ValueError("unavailability requires constant metric values")
@@ -169,11 +162,7 @@ def bind_config(device: DeviceConfig, scenario: ScenarioDocument) -> EmulatorCon
         oid_responses=[
             OidResponseConfig(oid=item.oid, mode=item.mode) for item in scenario.oid_responses
         ],
-        unavailability=(
-            DeviceUnavailabilityConfig.model_validate(scenario.unavailability.model_dump())
-            if scenario.unavailability is not None
-            else None
-        ),
+        unavailability=scenario.unavailability,
     )
 
 

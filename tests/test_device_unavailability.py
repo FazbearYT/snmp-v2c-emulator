@@ -180,6 +180,28 @@ def test_requires_constant_values_and_validates_legacy_yaml_model():
         )
 
 
+def test_fractional_outage_can_end_exactly_at_scenario_duration():
+    unavailability = {"at": 0.1, "duration": 0.2}
+    json_scenario = {
+        "duration": 0.3,
+        "update_interval": 0.1,
+        "rules": [],
+        "unavailability": unavailability,
+    }
+    yaml_config = {
+        "schema_version": 1,
+        "metrics": [{"name": "cpu", "oid": OID, "type": "Integer32", "initial": 15}],
+        "duration": 0.3,
+        "unavailability": unavailability,
+    }
+    assert ScenarioDocument.model_validate(json_scenario).unavailability is not None
+    assert EmulatorConfig.model_validate(yaml_config).unavailability is not None
+
+    for model, document in ((ScenarioDocument, json_scenario), (EmulatorConfig, yaml_config)):
+        with pytest.raises(ValidationError, match="interval must end within scenario duration"):
+            model.model_validate({**document, "duration": 0.29999999999999993})
+
+
 def test_outage_only_scenario_has_no_metric_actions():
     config = make_config()
     assert config.scenarios[0].actions == []
