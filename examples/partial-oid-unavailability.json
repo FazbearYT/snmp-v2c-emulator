@@ -1,0 +1,19 @@
+{
+  "duration": 8,
+  "update_interval": 0.1,
+  "rules": [],
+  "oid_responses": [
+    {
+      "oid": "1.3.6.1.4.1.55555.4.2.0",
+      "mode": "noSuchObject"
+    },
+    {
+      "oid": "1.3.6.1.4.1.55555.4.3.0",
+      "mode": "noSuchInstance"
+    },
+    {
+      "oid": "1.3.6.1.4.1.55555.4.5.0",
+      "mode": "genErr"
+    }
+  ]
+}
