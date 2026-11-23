@@ -22,7 +22,7 @@ from ..domain.oid import ObjectIdentifier
 from ..domain.store import MetricStore
 from ..domain.types import SnmpDataType, encode_octet_string
 from ..run_report import RequestCounters
-from .request_audit import RequestAudit
+from .request_audit import RequestAudit, SIMULATED_GENERR_RESPONSE
 
 LOGGER = logging.getLogger(__name__)
 MAX_UDP_PAYLOAD_BYTES = 65507
@@ -126,8 +126,12 @@ class ResponseSizeGuard:
         )
 
 
+class SimulatedOidGenError(smi_error.GenError):
+    """A genErr explicitly triggered by an OID response mode."""
+
+
 class SimulatedErrorResponder:
-    """Translate simulated instrumentation failures into SNMP genErr responses."""
+    """Translate instrumentation failures into SNMP genErr responses."""
 
     def _send_gen_error(
         self, snmp_engine: engine.SnmpEngine, state_reference: Any, pdu: Any, error: Any
@@ -136,7 +140,11 @@ class SimulatedErrorResponder:
         index = int(error["idx"]) + 1
         if not 1 <= index <= len(original):
             index = 1
-        self.send_varbinds(snmp_engine, state_reference, "genErr", index, original)
+        marker = SIMULATED_GENERR_RESPONSE.set(isinstance(error, SimulatedOidGenError))
+        try:
+            self.send_varbinds(snmp_engine, state_reference, "genErr", index, original)
+        finally:
+            SIMULATED_GENERR_RESPONSE.reset(marker)
         self.release_state_information(state_reference)
 
     def handle_management_operation(
@@ -335,7 +343,7 @@ class StoreInstrumentation(AbstractMibInstrumController):
             else:
                 mode = self._mode(oid)
                 if mode == "genErr":
-                    raise smi_error.GenError(idx=index)
+                    raise SimulatedOidGenError(idx=index)
                 if mode == "noSuchObject":
                     value = exval.noSuchObject
                 elif mode == "noSuchInstance":
@@ -359,7 +367,7 @@ class StoreInstrumentation(AbstractMibInstrumController):
                     break
                 mode = self._mode(metric.oid)
                 if mode == "genErr":
-                    raise smi_error.GenError(idx=index + index_offset)
+                    raise SimulatedOidGenError(idx=index + index_offset)
                 if mode in {"noSuchObject", "noSuchInstance"}:
                     cursor = metric.oid
                     continue
@@ -418,7 +426,6 @@ class SnmpAgent:
                     encode_octet_string(self.community),
                     V2cMessage,
                     counters=self.request_counters,
-                    simulated_generr="genErr" in self.oid_responses.values(),
                 )
                 transport.open_server_mode(sock=server_socket)
                 config.add_transport(

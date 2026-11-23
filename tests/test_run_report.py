@@ -256,3 +256,50 @@ def test_report_persistence_emits_no_credentials(caplog, tmp_path):
     with caplog.at_level(logging.INFO):
         save_report(path, document)
     assert "super-secret-value" not in path.read_text(encoding="utf-8")
+
+
+
+@pytest.mark.asyncio
+async def test_simulated_generr_count_is_per_actual_response():
+    from snmp_emulator.config import OidResponseConfig
+
+    config = configuration().model_copy(
+        update={"oid_responses": [OidResponseConfig(oid=OID, mode="genErr")]}
+    )
+    application = EmulatorApplication(config)
+    await application.agent.start()
+    try:
+        await get_response(config.agent.port)
+        assert application.stats.requests.received == 1
+        assert application.stats.requests.sent == 1
+        assert application.stats.requests.simulated_errors == 1
+    finally:
+        await application.agent.stop()
+
+
+@pytest.mark.asyncio
+async def test_unrelated_generr_not_counted_as_simulated(monkeypatch):
+    from pysnmp.smi import error as smi_error
+
+    from snmp_emulator.adapters.pysnmp_agent import StoreInstrumentation
+    from snmp_emulator.config import OidResponseConfig
+
+    config = configuration().model_copy(
+        update={"oid_responses": [OidResponseConfig(oid=OID, mode="genErr")]}
+    )
+    application = EmulatorApplication(config)
+    original_read = StoreInstrumentation.read_variables
+
+    def unexpected_error(self, *args, **kwargs):
+        raise smi_error.GenError(idx=0)
+
+    monkeypatch.setattr(StoreInstrumentation, "read_variables", unexpected_error)
+    await application.agent.start()
+    try:
+        await get_response(config.agent.port)
+        assert application.stats.requests.received == 1
+        assert application.stats.requests.sent == 1
+        assert application.stats.requests.simulated_errors == 0
+    finally:
+        await application.agent.stop()
+        monkeypatch.setattr(StoreInstrumentation, "read_variables", original_read)
