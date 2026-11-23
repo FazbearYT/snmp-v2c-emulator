@@ -3,6 +3,7 @@
 Only authenticated, supported SNMPv2c requests enter the audit. The community
 is intentionally neither stored nor written to the log.
 """
+
 from __future__ import annotations
 
 import logging
@@ -96,8 +97,13 @@ class RequestAudit:
         LOGGER.info(
             "snmp_request event=received token=%d time=%s source=%s:%d "
             "pdu=%s request_id=%d oids=%s",
-            token, record.timestamp, record.address, record.port,
-            record.pdu_type, record.request_id, ",".join(record.oids),
+            token,
+            record.timestamp,
+            record.address,
+            record.port,
+            record.pdu_type,
+            record.request_id,
+            ",".join(record.oids),
         )
 
     def _finish(
@@ -124,8 +130,12 @@ class RequestAudit:
             "snmp_request event=result token=%d source=%s:%d pdu=%s "
             "request_id=%d outcome=%s error_status=%s error_index=%s "
             "exceptions=%s reason=%s",
-            token, record.address, record.port, record.pdu_type,
-            record.request_id, outcome,
+            token,
+            record.address,
+            record.port,
+            record.pdu_type,
+            record.request_id,
+            outcome,
             error_status if error_status is not None else "-",
             error_index if error_index is not None else "-",
             ",".join(exceptions) if exceptions else "-",
