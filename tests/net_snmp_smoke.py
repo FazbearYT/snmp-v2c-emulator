@@ -11,6 +11,8 @@ from pathlib import Path
 
 CPU = "1.3.6.1.4.1.55555.1.1.0"
 TEMPERATURE = "1.3.6.1.4.1.55555.1.2.0"
+DEMO_ROOT = "1.3.6.1.4.1.55555.4"
+DEMO_CPU = f"{DEMO_ROOT}.1.0"
 
 
 def main() -> None:
@@ -22,20 +24,24 @@ def main() -> None:
         device_path = Path(temporary) / "device.json"
         target = f"127.0.0.1:{port}"
 
-        def query(command: str, oid: str) -> str:
+        def query(command: str, *oids: str, check: bool = True) -> subprocess.CompletedProcess:
             return subprocess.run(
-                [command, "-v2c", "-c", "public", "-t", "1", "-r", "0", "-On", target, oid],
+                [command, "-v2c", "-c", "public", "-t", "0.3", "-r", "0", "-On", target, *oids],
                 capture_output=True,
                 text=True,
-                check=True,
+                check=check,
                 timeout=5,
-            ).stdout
+            )
 
         for device_name, scenario, oid, final_value, delay in (
             ("device.json", "stable", CPU, 15, 0.1),
             ("device.json", "temperature-jump", TEMPERATURE, 80, 5.2),
             ("device.json", "cpu-step", CPU, 90, 8.2),
-            ("device-emergency.json", "recovery", "1.3.6.1.4.1.55555.4.1.0", 15, 12.2),
+            ("device-normal.json", "demo-normal", DEMO_CPU, 15, 0.1),
+            ("device-normal.json", "demo-degradation", DEMO_CPU, 95, 12.2),
+            ("device-emergency.json", "recovery", DEMO_CPU, 15, 12.2),
+            ("device-normal.json", "device-unavailability", DEMO_CPU, 15, 2.1),
+            ("device-normal.json", "partial-oid-unavailability", DEMO_CPU, 15, 0),
         ):
             device = json.loads((examples / device_name).read_text(encoding="utf-8"))
             device["agent"].update(host="127.0.0.1", port=port)
@@ -52,6 +58,7 @@ def main() -> None:
                 ],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
+                cwd=temporary,
                 text=True,
             )
             try:
@@ -60,18 +67,45 @@ def main() -> None:
                     if process.poll() is not None:
                         raise RuntimeError(f"emulator exited: {process.stderr.read()}")
                     try:
-                        initial = query("snmpget", oid)
+                        initial = query("snmpget", oid).stdout
                         break
                     except subprocess.CalledProcessError:
                         if time.monotonic() >= deadline:
                             raise
                 if scenario == "recovery" and "INTEGER: 95" not in initial:
                     raise RuntimeError(f"recovery did not start with emergency CPU: {initial}")
+                if (
+                    scenario in {"demo-degradation", "device-unavailability"}
+                    and "INTEGER: 15" not in initial
+                ):
+                    raise RuntimeError(f"unexpected initial CPU for {scenario}: {initial}")
                 time.sleep(delay)
-                result = query("snmpget", oid)
+                if scenario == "device-unavailability":
+                    suppressed = query("snmpget", oid, check=False)
+                    if suppressed.returncode == 0 or "timeout" not in suppressed.stderr.lower():
+                        raise RuntimeError(f"expected Net-SNMP timeout: {suppressed}")
+                    time.sleep(2)
+                result = query("snmpget", oid).stdout
                 if f"INTEGER: {final_value}" not in result:
                     raise RuntimeError(f"unexpected {scenario} value: {result}")
-                walked = query("snmpwalk", "1.3.6.1.4.1.55555")
+                if scenario == "partial-oid-unavailability":
+                    temperature_oid = f"{DEMO_ROOT}.2.0"
+                    description_oid = f"{DEMO_ROOT}.3.0"
+                    status_oid = f"{DEMO_ROOT}.5.0"
+                    missing = query("snmpget", DEMO_CPU, temperature_oid, description_oid).stdout
+                    for expected in ("INTEGER: 15", "No Such Object", "No Such Instance"):
+                        if expected not in missing:
+                            raise RuntimeError(f"unexpected mixed GET response: {missing}")
+                    failure = query("snmpget", DEMO_CPU, status_oid, check=False)
+                    if (
+                        failure.returncode == 0
+                        or "generror" not in failure.stderr.lower()
+                        or status_oid not in failure.stderr
+                    ):
+                        raise RuntimeError(f"unexpected genErr response: {failure}")
+                    print(f"Net-SNMP {scenario}: GET exceptions and genErr passed", flush=True)
+                    continue
+                walked = query("snmpwalk", "1.3.6.1.4.1.55555").stdout
                 walked_oids = [
                     line.split(" = ", 1)[0]
                     for line in walked.splitlines()
@@ -89,7 +123,7 @@ def main() -> None:
                         )
                         if line.split(": ", 1)[1].strip('"') != expected:
                             raise RuntimeError(f"unexpected recovery metric: {line}")
-                missing = query("snmpget", "1.3.6.1.4.1.55555.99.0")
+                missing = query("snmpget", "1.3.6.1.4.1.55555.99.0").stdout
                 if "No Such Object" not in missing:
                     raise RuntimeError(f"unexpected unknown OID response: {missing}")
                 print(f"Net-SNMP {scenario}: GET, WALK and unknown OID passed", flush=True)
