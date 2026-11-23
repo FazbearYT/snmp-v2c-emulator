@@ -17,6 +17,17 @@ from .json_config import load_json_config
 LOGGER = logging.getLogger(__name__)
 
 PROFILES = {
+    "Демо ТЗ · 1/5 · Нормальная работа": ("device-normal.json", "demo-normal.json"),
+    "Демо ТЗ · 2/5 · Деградация": ("device-normal.json", "demo-degradation.json"),
+    "Демо ТЗ · 3/5 · Восстановление": ("device-emergency.json", "recovery.json"),
+    "Демо ТЗ · 4/5 · Полная недоступность": (
+        "device-normal.json",
+        "device-unavailability.json",
+    ),
+    "Демо ТЗ · 5/5 · Частичная недоступность": (
+        "device-normal.json",
+        "partial-oid-unavailability.json",
+    ),
     "device · 5 метрик · Стабильные показатели": ("device.json", "stable.json"),
     "device · 5 метрик · Скачок температуры": ("device.json", "temperature-jump.json"),
     "device · 5 метрик · Рост загрузки процессора": ("device.json", "cpu-step.json"),
