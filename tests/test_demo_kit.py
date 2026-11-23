@@ -21,9 +21,7 @@ from snmp_emulator.json_config import load_json_config
 
 EXAMPLES = Path(__file__).parents[1] / "examples"
 ROOT = "1.3.6.1.4.1.55555.4"
-CPU, TEMP, DESC, MEMORY, STATUS, ERRORS = (
-    f"{ROOT}.{i}.0" for i in range(1, 7)
-)
+CPU, TEMP, DESC, MEMORY, STATUS, ERRORS = (f"{ROOT}.{i}.0" for i in range(1, 7))
 PAIRS = {
     "normal": ("device-normal.json", "demo-normal.json"),
     "degradation": ("device-normal.json", "demo-degradation.json"),
@@ -33,8 +31,12 @@ PAIRS = {
 }
 NORMAL = {CPU: 15, TEMP: 35, DESC: "SNMP demo device", MEMORY: 40, STATUS: "up", ERRORS: 0}
 EMERGENCY = {
-    CPU: 95, TEMP: 80, DESC: "SNMP demo device", MEMORY: 85,
-    STATUS: "down", ERRORS: 120,
+    CPU: 95,
+    TEMP: 80,
+    DESC: "SNMP demo device",
+    MEMORY: 85,
+    STATUS: "down",
+    ERRORS: 120,
 }
 RECOVERED = {**NORMAL, ERRORS: 120}
 
@@ -67,9 +69,7 @@ def packet(oids: list[str], pdu_type=v2c.GetRequestPDU) -> bytes:
     pdu = pdu_type()
     v2c.apiPDU.set_defaults(pdu)
     v2c.apiPDU.set_request_id(pdu, 239)
-    v2c.apiPDU.set_varbinds(
-        pdu, [(rfc1902.ObjectName(oid), rfc1902.Null("")) for oid in oids]
-    )
+    v2c.apiPDU.set_varbinds(pdu, [(rfc1902.ObjectName(oid), rfc1902.Null("")) for oid in oids])
     message = V2cMessage()
     v2c.apiMessage.set_defaults(message)
     v2c.apiMessage.set_community(message, b"public")
@@ -93,7 +93,9 @@ def readings(pdu) -> dict[str, object]:
     values = {}
     for oid, value in v2c.apiPDU.get_varbinds(pdu):
         if value.tagSet in (
-            exval.noSuchObject.tagSet, exval.noSuchInstance.tagSet, exval.endOfMibView.tagSet
+            exval.noSuchObject.tagSet,
+            exval.noSuchInstance.tagSet,
+            exval.endOfMibView.tagSet,
         ):
             values[str(oid)] = value.tagSet
         elif str(oid) in (DESC, STATUS):
@@ -176,9 +178,7 @@ async def test_full_outage_times_out_then_recovers_without_metric_changes():
     task = asyncio.create_task(app.run())
     try:
         await wait_running(app)
-        assert readings(await query(cfg.agent.port, [CPU, MEMORY])) == {
-            CPU: 15, MEMORY: 40
-        }
+        assert readings(await query(cfg.agent.port, [CPU, MEMORY])) == {CPU: 15, MEMORY: 40}
         async with asyncio.timeout(2):
             while not app.agent.unavailable:
                 await asyncio.sleep(0.005)
