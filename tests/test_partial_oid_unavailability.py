@@ -90,17 +90,20 @@ async def test_mixed_get_keeps_values_and_two_distinct_exceptions(caplog):
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
             sock.bind(("127.0.0.1", 0))
             sock.setblocking(False)
+            expected_oids = [A, B, C, D, f"{ROOT}.1", f"{ROOT}.2.1"]
             pdu = await exchange(
                 sock,
                 config.agent.port,
-                request(v2c.GetRequestPDU, [A, B, C, D]),
+                request(v2c.GetRequestPDU, expected_oids),
             )
         assert int(v2c.apiPDU.get_error_status(pdu)) == 0
         response = values(pdu)
-        assert [oid for oid, _ in response] == [A, B, C, D]
+        assert [oid for oid, _ in response] == expected_oids
         assert [int(response[i][1]) for i in (0, 3)] == [1, 4]
         assert response[1][1].tagSet == exval.noSuchObject.tagSet
         assert response[2][1].tagSet == exval.noSuchInstance.tagSet
+        assert response[4][1].tagSet == exval.noSuchInstance.tagSet
+        assert response[5][1].tagSet == exval.noSuchObject.tagSet
         logs = [entry.getMessage() for entry in caplog.records]
         assert any("noSuchObject" in line and "noSuchInstance" in line for line in logs)
     finally:
