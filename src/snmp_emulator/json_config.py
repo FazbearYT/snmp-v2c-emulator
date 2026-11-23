@@ -74,7 +74,12 @@ class StepRule(OidRule):
         return value
 
 
-Rule = Annotated[ConstantRule | JumpRule | StepRule, Field(discriminator="type")]
+class SequenceRule(OidRule):
+    type: Literal["sequence"]
+    values: list[Any] = Field(min_length=1)
+
+
+Rule = Annotated[ConstantRule | JumpRule | StepRule | SequenceRule, Field(discriminator="type")]
 
 
 class UnavailabilityRule(BaseModel):
@@ -124,6 +129,15 @@ def bind_config(device: DeviceConfig, scenario: ScenarioDocument) -> EmulatorCon
                     "metric": metric.name,
                     "at": rule.at if isinstance(rule, JumpRule) else 0.0,
                     "value": rule.value,
+                }
+            )
+        elif isinstance(rule, SequenceRule):
+            actions.append(
+                {
+                    "type": "sequence",
+                    "metric": metric.name,
+                    "interval": scenario.update_interval,
+                    "values": rule.values,
                 }
             )
         else:
