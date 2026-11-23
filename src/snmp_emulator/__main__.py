@@ -13,6 +13,7 @@ from .application import EmulatorApplication
 from .config import ConfigurationError, load_config
 from .json_config import load_json_config
 from .logging_config import configure_logging
+from .run_report import default_report_path
 
 LOGGER = logging.getLogger(__name__)
 
@@ -91,9 +92,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     try:
         source = args.scenario if args.scenario is not None else args.config
-        from .run_report import default_report_path
-
         path = args.report_file or default_report_path(source)
+        destination = path.resolve()
+        for input_path in (args.config, args.device_config, args.scenario):
+            if input_path is not None and (
+                destination == input_path.resolve()
+                or (destination.exists() and destination.samefile(input_path))
+            ):
+                LOGGER.error("report destination must differ from input configuration: %s", path)
+                return 2
         application = EmulatorApplication(config)
         if hasattr(application, "configure_report"):
             application.configure_report(scenario_id=source.stem, path=path)
