@@ -202,7 +202,11 @@ class RequestAudit:
             error_status=status,
             error_index=index,
             exceptions=exceptions,
-            reason=None if sent else ("device_unavailable" if suppressed else "transport_send_failed"),
+            reason=(
+                None
+                if sent
+                else ("device_unavailable" if suppressed else "transport_send_failed")
+            ),
         )
 
     def close(self) -> None:
