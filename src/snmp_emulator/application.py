@@ -11,13 +11,8 @@ from .config import EmulatorConfig
 from .domain.metric import Metric
 from .domain.oid import ObjectIdentifier
 from .domain.store import MetricStore
+from .run_report import RunStatistics, build_report, save_report, utc_now
 from .scenarios.engine import ScenarioEngine, build_scenarios
-from .run_report import (
-    RunStatistics,
-    build_report,
-    save_report,
-    utc_now,
-)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -65,6 +60,10 @@ class EmulatorApplication:
             tick_interval=config.update_interval,
             duration=config.duration,
         )
+
+    def configure_report(self, *, scenario_id: str, path: Path) -> None:
+        self.scenario_id = scenario_id
+        self.report_path = path
 
     async def _schedule_unavailability(self, started_at: float) -> None:
         outage = self.config.unavailability

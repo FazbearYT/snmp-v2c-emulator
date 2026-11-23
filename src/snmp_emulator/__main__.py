@@ -94,11 +94,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         from .run_report import default_report_path
 
         path = args.report_file or default_report_path(source)
-        asyncio.run(
-            run_application(
-                EmulatorApplication(config, scenario_id=source.stem, report_path=path)
-            )
-        )
+        application = EmulatorApplication(config)
+        if hasattr(application, "configure_report"):
+            application.configure_report(scenario_id=source.stem, path=path)
+        asyncio.run(run_application(application))
     except KeyboardInterrupt:
         pass
     except OSError as exc:

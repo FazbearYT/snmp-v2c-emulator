@@ -100,7 +100,15 @@ def build_report(
         "outcome": status,
         "initial_metrics": initial_values,
         "final_metrics": final_values,
-        "requests": vars(stats.requests).copy(),
+        "requests": {
+            "received": stats.requests.received,
+            "sent": stats.requests.sent,
+            "intentionally_suppressed": stats.requests.intentionally_suppressed,
+            "simulated_errors": stats.requests.simulated_errors,
+            "no_such_object": stats.requests.no_such_object,
+            "no_such_instance": stats.requests.no_such_instance,
+            "unsuccessful_delivery": stats.requests.unsuccessful_delivery,
+        },
         "errors": list(stats.errors),
     }
 
