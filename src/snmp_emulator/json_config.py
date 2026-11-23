@@ -13,6 +13,7 @@ from .config import (
     DeviceUnavailabilityConfig,
     EmulatorConfig,
     MetricConfig,
+    OidResponseConfig,
     ScenarioConfig,
 )
 from .domain.oid import ObjectIdentifier
@@ -82,11 +83,16 @@ class SequenceRule(OidRule):
 Rule = Annotated[ConstantRule | JumpRule | StepRule | SequenceRule, Field(discriminator="type")]
 
 
-class UnavailabilityRule(BaseModel):
+class OidResponseRule(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    at: Seconds
-    duration: PositiveSeconds
+    oid: str
+    mode: Literal["normal", "noSuchObject", "noSuchInstance", "genErr"]
+
+    @field_validator("oid")
+    @classmethod
+    def normalize_oid(cls, value: str) -> str:
+        return str(ObjectIdentifier.parse(value))
 
 
 class ScenarioDocument(BaseModel):
@@ -95,14 +101,18 @@ class ScenarioDocument(BaseModel):
     duration: PositiveSeconds
     update_interval: PositiveSeconds
     rules: list[Rule] = Field(default_factory=list)
-    unavailability: UnavailabilityRule | None = None
+    unavailability: DeviceUnavailabilityConfig | None = None
+    oid_responses: list[OidResponseRule] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_rules(self) -> ScenarioDocument:
-        if not self.rules and self.unavailability is None:
-            raise ValueError("scenario requires rules or unavailability")
+        if not self.rules and self.unavailability is None and not self.oid_responses:
+            raise ValueError("scenario requires rules, unavailability or OID responses")
+        mode_oids = [item.oid for item in self.oid_responses]
+        if len(mode_oids) != len(set(mode_oids)):
+            raise ValueError("OID response configuration may contain only one mode per OID")
         if self.unavailability is not None:
-            if self.unavailability.at + self.unavailability.duration > self.duration:
+            if self.unavailability.ends_after(self.duration):
                 raise ValueError("unavailability interval must end within scenario duration")
             if any(not isinstance(rule, ConstantRule) for rule in self.rules):
                 raise ValueError("unavailability requires constant metric values")
@@ -163,11 +173,10 @@ def bind_config(device: DeviceConfig, scenario: ScenarioDocument) -> EmulatorCon
         scenarios=[ScenarioConfig(name="json", actions=actions)],
         duration=scenario.duration,
         update_interval=scenario.update_interval,
-        unavailability=(
-            DeviceUnavailabilityConfig.model_validate(scenario.unavailability.model_dump())
-            if scenario.unavailability is not None
-            else None
-        ),
+        oid_responses=[
+            OidResponseConfig(oid=item.oid, mode=item.mode) for item in scenario.oid_responses
+        ],
+        unavailability=scenario.unavailability,
     )
 
 

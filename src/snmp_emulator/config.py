@@ -172,6 +172,23 @@ class DeviceUnavailabilityConfig(BaseModel):
     at: float = Field(ge=0, allow_inf_nan=False, strict=True)
     duration: float = Field(gt=0, allow_inf_nan=False, strict=True)
 
+    def ends_after(self, scenario_duration: float) -> bool:
+        return Decimal(str(self.at)) + Decimal(str(self.duration)) > Decimal(str(scenario_duration))
+
+
+class OidResponseConfig(BaseModel):
+    """Simulated response behavior for a configured metric OID."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    oid: str
+    mode: Literal["normal", "noSuchObject", "noSuchInstance", "genErr"]
+
+    @field_validator("oid")
+    @classmethod
+    def normalize_oid(cls, value: str) -> str:
+        return str(ObjectIdentifier.parse(value))
+
 
 class EmulatorConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -183,6 +200,7 @@ class EmulatorConfig(BaseModel):
     duration: float | None = Field(default=None, gt=0, allow_inf_nan=False, strict=True)
     update_interval: float = Field(default=0.1, gt=0, allow_inf_nan=False, strict=True)
     unavailability: DeviceUnavailabilityConfig | None = None
+    oid_responses: list[OidResponseConfig] = Field(default_factory=list)
 
     @field_validator("schema_version", mode="before")
     @classmethod
@@ -207,20 +225,27 @@ class EmulatorConfig(BaseModel):
         if self.unavailability is not None:
             if self.duration is None:
                 raise ValueError("unavailability requires a finite scenario duration")
-            if self.unavailability.at + self.unavailability.duration > self.duration:
+            if self.unavailability.ends_after(self.duration):
                 raise ValueError("unavailability interval must end within scenario duration")
             for scenario in self.scenarios:
                 if scenario.repeat_every is not None:
                     raise ValueError("unavailability does not support repeating scenarios")
                 if any(action.type != "set" or action.at != 0 for action in scenario.actions):
                     raise ValueError("unavailability requires constant metric values")
+        configured_oids = {metric.oid for metric in self.metrics}
+        response_oids = [item.oid for item in self.oid_responses]
+        if len(response_oids) != len(set(response_oids)):
+            raise ValueError("OID response configuration may contain only one mode per OID")
+        for oid in response_oids:
+            if oid not in configured_oids:
+                raise ValueError(f"unknown OID response target: {oid}")
         metrics = {metric.name: metric for metric in self.metrics}
         scenario_names = [scenario.name for scenario in self.scenarios]
         metric_owners: dict[str, str] = {}
         if len(scenario_names) != len(set(scenario_names)):
             raise ValueError("scenario names must be unique")
         for scenario in self.scenarios:
-            if not scenario.actions and self.unavailability is None:
+            if not scenario.actions and self.unavailability is None and not self.oid_responses:
                 raise ValueError("scenario requires at least one action")
             action_moments: set[tuple[str, float]] = set()
             for action in scenario.actions:
