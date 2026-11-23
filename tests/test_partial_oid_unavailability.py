@@ -59,9 +59,7 @@ def request(pdu_type, oids: list[str], *, non_repeaters=0, repetitions=2) -> byt
     else:
         v2c.apiPDU.set_defaults(pdu)
     v2c.apiPDU.set_request_id(pdu, 109)
-    v2c.apiPDU.set_varbinds(
-        pdu, [(rfc1902.ObjectName(oid), rfc1902.Null("")) for oid in oids]
-    )
+    v2c.apiPDU.set_varbinds(pdu, [(rfc1902.ObjectName(oid), rfc1902.Null("")) for oid in oids])
     message = V2cMessage()
     v2c.apiMessage.set_defaults(message)
     v2c.apiMessage.set_community(message, b"public")
@@ -93,7 +91,8 @@ async def test_mixed_get_keeps_values_and_two_distinct_exceptions(caplog):
             sock.bind(("127.0.0.1", 0))
             sock.setblocking(False)
             pdu = await exchange(
-                sock, config.agent.port,
+                sock,
+                config.agent.port,
                 request(v2c.GetRequestPDU, [A, B, C, D]),
             )
         assert int(v2c.apiPDU.get_error_status(pdu)) == 0
@@ -119,15 +118,15 @@ async def test_get_generr_uses_original_request_index_and_audit(caplog):
             sock.bind(("127.0.0.1", 0))
             sock.setblocking(False)
             pdu = await exchange(
-                sock, config.agent.port,
+                sock,
+                config.agent.port,
                 request(v2c.GetRequestPDU, [A, C, D]),
             )
         assert int(v2c.apiPDU.get_error_status(pdu)) == 5
         assert int(v2c.apiPDU.get_error_index(pdu)) == 2
         assert [oid for oid, _ in values(pdu)] == [A, C, D]
         assert any(
-            "error_status=5 error_index=2" in record.getMessage()
-            for record in caplog.records
+            "error_status=5 error_index=2" in record.getMessage() for record in caplog.records
         )
     finally:
         await app.agent.stop()
@@ -143,13 +142,15 @@ async def test_getnext_skips_absent_and_bulk_preserves_lexical_order():
             sock.bind(("127.0.0.1", 0))
             sock.setblocking(False)
             nxt = await exchange(
-                sock, config.agent.port,
+                sock,
+                config.agent.port,
                 request(v2c.GetNextRequestPDU, [A]),
             )
             assert values(nxt)[0][0] == D
             assert int(values(nxt)[0][1]) == 4
             bulk = await exchange(
-                sock, config.agent.port,
+                sock,
+                config.agent.port,
                 request(v2c.GetBulkRequestPDU, [ROOT], repetitions=3),
             )
             assert [oid for oid, _ in values(bulk)[:2]] == [A, D]
@@ -168,16 +169,20 @@ async def test_next_and_bulk_generr_use_correct_variable_index():
             sock.bind(("127.0.0.1", 0))
             sock.setblocking(False)
             nxt = await exchange(
-                sock, config.agent.port,
+                sock,
+                config.agent.port,
                 request(v2c.GetNextRequestPDU, [D, B]),
             )
             assert int(v2c.apiPDU.get_error_status(nxt)) == 5
             assert int(v2c.apiPDU.get_error_index(nxt)) == 2
             bulk = await exchange(
-                sock, config.agent.port,
+                sock,
+                config.agent.port,
                 request(
-                    v2c.GetBulkRequestPDU, [D, B],
-                    non_repeaters=1, repetitions=1,
+                    v2c.GetBulkRequestPDU,
+                    [D, B],
+                    non_repeaters=1,
+                    repetitions=1,
                 ),
             )
             assert int(v2c.apiPDU.get_error_status(bulk)) == 5
@@ -211,7 +216,9 @@ def test_invalid_oid_responses_are_rejected(responses):
     with pytest.raises(ValidationError):
         ScenarioDocument.model_validate(
             {
-                "duration": 1.0, "update_interval": 0.1, "rules": [],
+                "duration": 1.0,
+                "update_interval": 0.1,
+                "rules": [],
                 "oid_responses": responses,
             }
         )
@@ -226,7 +233,8 @@ def test_unknown_oid_mode_target_is_rejected_during_binding():
     )
     scenario = ScenarioDocument.model_validate(
         {
-            "duration": 1.0, "update_interval": 0.1,
+            "duration": 1.0,
+            "update_interval": 0.1,
             "oid_responses": [{"oid": B, "mode": "genErr"}],
         }
     )

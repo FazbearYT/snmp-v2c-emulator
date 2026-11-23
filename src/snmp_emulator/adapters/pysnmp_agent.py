@@ -171,8 +171,11 @@ class V2cBulkCommandResponder(
     truncate_varbinds = True
 
     def handle_management_operation(
-        self, snmp_engine: engine.SnmpEngine, state_reference: Any,
-        context_name: Any, pdu: Any,
+        self,
+        snmp_engine: engine.SnmpEngine,
+        state_reference: Any,
+        context_name: Any,
+        pdu: Any,
     ) -> None:
         non_repeaters = max(int(v2c.apiBulkPDU.get_non_repeaters(pdu)), 0)
         repetitions = max(int(v2c.apiBulkPDU.get_max_repetitions(pdu)), 0)
@@ -305,8 +308,7 @@ class StoreInstrumentation(AbstractMibInstrumController):
     def __init__(self, store: MetricStore, oid_responses: dict[str, str] | None = None) -> None:
         self.store = store
         self.oid_responses = {
-            ObjectIdentifier.parse(oid): mode
-            for oid, mode in (oid_responses or {}).items()
+            ObjectIdentifier.parse(oid): mode for oid, mode in (oid_responses or {}).items()
         }
 
     def _mode(self, oid: ObjectIdentifier) -> str:
@@ -367,7 +369,11 @@ class StoreInstrumentation(AbstractMibInstrumController):
 
 class SnmpAgent:
     def __init__(
-        self, host: str, port: int, community: str, store: MetricStore,
+        self,
+        host: str,
+        port: int,
+        community: str,
+        store: MetricStore,
         oid_responses: dict[str, str] | None = None,
     ) -> None:
         self.host = host

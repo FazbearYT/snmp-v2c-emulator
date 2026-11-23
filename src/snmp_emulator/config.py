@@ -242,11 +242,7 @@ class EmulatorConfig(BaseModel):
         if len(scenario_names) != len(set(scenario_names)):
             raise ValueError("scenario names must be unique")
         for scenario in self.scenarios:
-            if (
-                not scenario.actions
-                and self.unavailability is None
-                and not self.oid_responses
-            ):
+            if not scenario.actions and self.unavailability is None and not self.oid_responses:
                 raise ValueError("scenario requires at least one action")
             action_moments: set[tuple[str, float]] = set()
             for action in scenario.actions:
