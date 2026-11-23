@@ -77,6 +77,14 @@ class EmulatorApplication:
         finally:
             self.agent.set_unavailable(False)
 
+    def _record_failure(self, error: BaseException) -> None:
+        if isinstance(error, BaseExceptionGroup):
+            for nested in error.exceptions:
+                self._record_failure(nested)
+            return
+        detail = str(error).replace(self.config.agent.community, "[redacted]")
+        self.stats.record_error(f"{type(error).__name__}: {detail}")
+
     async def _run_scenario(self) -> None:
         await self.scenario_engine.run()
         self.scenario_completed = True
@@ -106,7 +114,7 @@ class EmulatorApplication:
             raise
         except BaseException as exc:
             failed = True
-            self.stats.record_error(type(exc).__name__)
+            self._record_failure(exc)
             raise
         finally:
             was_started = self.started.is_set()
