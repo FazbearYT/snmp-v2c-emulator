@@ -27,6 +27,10 @@ PROFILES = {
         "device-normal.json",
         "device-unavailability.json",
     ),
+    "device · 6 метрик · Частичная недоступность": (
+        "device-normal.json",
+        "partial-oid-unavailability.json",
+    ),
 }
 
 

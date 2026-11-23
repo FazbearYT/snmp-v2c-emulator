@@ -36,6 +36,7 @@ class EmulatorApplication:
             config.agent.port,
             config.agent.community,
             self.store,
+            oid_responses={item.oid: item.mode for item in config.oid_responses},
         )
         self.scenario_engine = ScenarioEngine(
             self.store,
