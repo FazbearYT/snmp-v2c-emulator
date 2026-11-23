@@ -258,7 +258,6 @@ def test_report_persistence_emits_no_credentials(caplog, tmp_path):
     assert "super-secret-value" not in path.read_text(encoding="utf-8")
 
 
-
 @pytest.mark.asyncio
 async def test_simulated_generr_count_is_per_actual_response():
     from snmp_emulator.config import OidResponseConfig
