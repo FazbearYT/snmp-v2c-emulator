@@ -145,7 +145,7 @@ class EmulatorApplication:
                 if self.report_path is not None:
                     try:
                         save_report(self.report_path, self.report)
-                        LOGGER.info("run report saved: %s", self.report_path)
+                        LOGGER.debug("run report saved: %s", self.report_path)
                     except OSError as exc:
                         LOGGER.error("cannot save run report %s: %s", self.report_path, exc)
                         if not failed:

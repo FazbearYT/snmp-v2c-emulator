@@ -21,8 +21,8 @@ from ..domain.metric import Metric
 from ..domain.oid import ObjectIdentifier
 from ..domain.store import MetricStore
 from ..domain.types import SnmpDataType, encode_octet_string
-from .request_audit import RequestAudit
 from ..run_report import RequestCounters
+from .request_audit import RequestAudit
 
 LOGGER = logging.getLogger(__name__)
 MAX_UDP_PAYLOAD_BYTES = 65507

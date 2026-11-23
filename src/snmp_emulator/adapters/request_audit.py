@@ -14,11 +14,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from ..run_report import RequestCounters
-
 from pyasn1.codec.ber import decoder
 from pysnmp.proto.api import v2c
 from pysnmp.smi import exval
+
+from ..run_report import RequestCounters
 
 LOGGER = logging.getLogger(__name__)
 MAX_PENDING_REQUESTS = 4096
