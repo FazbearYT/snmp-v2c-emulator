@@ -22,6 +22,7 @@ from ..domain.oid import ObjectIdentifier
 from ..domain.store import MetricStore
 from ..domain.types import SnmpDataType, encode_octet_string
 from .request_audit import RequestAudit
+from ..run_report import RequestCounters
 
 LOGGER = logging.getLogger(__name__)
 MAX_UDP_PAYLOAD_BYTES = 65507
@@ -375,7 +376,9 @@ class SnmpAgent:
         community: str,
         store: MetricStore,
         oid_responses: dict[str, str] | None = None,
+        request_counters: RequestCounters | None = None,
     ) -> None:
+        self.request_counters = request_counters
         self.host = host
         self.port = port
         self.community = community
@@ -412,7 +415,10 @@ class SnmpAgent:
                 snmp_engine.message_processing_subsystems[1] = V2cMessageProcessingModel()
                 transport = ManagedUdpTransport()
                 transport._request_audit = RequestAudit(  # shared by CLI and GUI
-                    encode_octet_string(self.community), V2cMessage
+                    encode_octet_string(self.community),
+                    V2cMessage,
+                    counters=self.request_counters,
+                    simulated_generr="genErr" in self.oid_responses.values(),
                 )
                 transport.open_server_mode(sock=server_socket)
                 config.add_transport(

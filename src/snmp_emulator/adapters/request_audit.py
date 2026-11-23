@@ -14,6 +14,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
+from ..run_report import RequestCounters
+
 from pyasn1.codec.ber import decoder
 from pysnmp.proto.api import v2c
 from pysnmp.smi import exval
@@ -39,8 +41,16 @@ class RequestAudit:
     duplicates with identical request IDs are never collapsed.
     """
 
-    def __init__(self, community: bytes, message_spec: Callable[[], Any]) -> None:
+    def __init__(
+        self,
+        community: bytes,
+        message_spec: Callable[[], Any],
+        counters: RequestCounters | None = None,
+        simulated_generr: bool = False,
+    ) -> None:
         self._community = community
+        self._counters = counters
+        self._simulated_generr = simulated_generr
         self._message_spec = message_spec
         self._next_token = 0
         self._pending: OrderedDict[int, RequestRecord] = OrderedDict()
@@ -93,6 +103,8 @@ class RequestAudit:
         self._next_token += 1
         token = self._next_token
         self._pending[token] = record
+        if self._counters is not None:
+            self._counters.received_request()
         self._by_key.setdefault(self._key(address, request_id), deque()).append(token)
         LOGGER.info(
             "snmp_request event=received token=%d time=%s source=%s:%d "
@@ -119,6 +131,14 @@ class RequestAudit:
         record = self._pending.pop(token, None)
         if record is None:
             return
+        if self._counters is not None:
+            self._counters.finished_request(
+                outcome=outcome,
+                error_status=error_status,
+                exceptions=exceptions,
+                reason=reason,
+                simulated_generr=self._simulated_generr,
+            )
         key = self._key((record.address, record.port), record.request_id)
         queue = self._by_key.get(key)
         if queue is not None:

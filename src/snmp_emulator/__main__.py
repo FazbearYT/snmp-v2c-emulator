@@ -24,6 +24,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--device-config", type=Path, help="path to a JSON device configuration")
     parser.add_argument("--scenario", type=Path, help="path to a JSON scenario")
     parser.add_argument("--check-config", action="store_true")
+    parser.add_argument("--report-file", type=Path, help="JSON report destination")
+
     parser.add_argument(
         "--log-level",
         choices=("DEBUG", "INFO", "WARNING", "ERROR"),
@@ -88,7 +90,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"configuration is valid: {len(config.metrics)} metrics")
         return 0
     try:
-        asyncio.run(run_application(EmulatorApplication(config)))
+        source = args.scenario if args.scenario is not None else args.config
+        from .run_report import default_report_path
+
+        path = args.report_file or default_report_path(source)
+        asyncio.run(
+            run_application(
+                EmulatorApplication(config, scenario_id=source.stem, report_path=path)
+            )
+        )
     except KeyboardInterrupt:
         pass
     except OSError as exc:
