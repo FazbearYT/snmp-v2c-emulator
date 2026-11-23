@@ -4,6 +4,7 @@ import socket
 
 import pytest
 from pyasn1.codec.ber import decoder, encoder
+from pysnmp.carrier.asyncio.dgram import udp
 from pysnmp.proto import rfc1902
 from pysnmp.proto.api import v2c
 
@@ -148,6 +149,34 @@ async def test_audit_logs_too_big_response(caplog):
     results = [r.message for r in caplog.records if "event=result" in r.message]
     assert len(results) == 1
     assert "outcome=sent error_status=1 error_index=0" in results[0]
+
+
+@pytest.mark.asyncio
+async def test_audit_records_udp_transport_send_failure(caplog, monkeypatch):
+    port = free_port()
+    metric = Metric("cpu", ObjectIdentifier.parse(OID), SnmpDataType.INTEGER32, 42)
+    agent = SnmpAgent("127.0.0.1", port, "public", MetricStore([metric]))
+    attempted_send = asyncio.Event()
+
+    def fail_send(transport, outgoing_message, transport_address):
+        attempted_send.set()
+        raise OSError("UDP send failed")
+
+    monkeypatch.setattr(udp.UdpAsyncioTransport, "send_message", fail_send)
+    caplog.set_level(logging.INFO, logger="snmp_emulator.adapters.request_audit")
+    await agent.start()
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.bind(("127.0.0.1", 0))
+            sock.sendto(request(v2c.GetRequestPDU), ("127.0.0.1", port))
+            await asyncio.wait_for(attempted_send.wait(), timeout=1)
+    finally:
+        await agent.stop()
+
+    results = [r.message for r in caplog.records if "event=result" in r.message]
+    assert len(results) == 1
+    assert "outcome=not_sent" in results[0]
+    assert "reason=transport_send_failed" in results[0]
 
 
 def test_audit_reports_unanswered_request_on_shutdown(caplog):
