@@ -46,6 +46,7 @@ def main() -> None:
             device = json.loads((examples / device_name).read_text(encoding="utf-8"))
             device["agent"].update(host="127.0.0.1", port=port)
             device_path.write_text(json.dumps(device), encoding="utf-8")
+            report_path = Path(temporary) / f"{scenario}-report.json"
             process = subprocess.Popen(
                 [
                     sys.executable,
@@ -55,6 +56,8 @@ def main() -> None:
                     str(device_path),
                     "--scenario",
                     str(examples / f"{scenario}.json"),
+                    "--report-file",
+                    str(report_path),
                 ],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
@@ -104,32 +107,48 @@ def main() -> None:
                     ):
                         raise RuntimeError(f"unexpected genErr response: {failure}")
                     print(f"Net-SNMP {scenario}: GET exceptions and genErr passed", flush=True)
-                    continue
-                walked = query("snmpwalk", "1.3.6.1.4.1.55555").stdout
-                walked_oids = [
-                    line.split(" = ", 1)[0]
-                    for line in walked.splitlines()
-                    if " = INTEGER: " in line or " = STRING: " in line
-                ]
-                expected_oids = [f".{metric['oid']}" for metric in device["metrics"]]
-                if walked_oids != expected_oids:
-                    raise RuntimeError(f"unexpected walk: {walked}")
-                if scenario == "recovery":
-                    for suffix, expected in (("2", "35"), ("5", "up"), ("6", "120")):
-                        line = next(
-                            line
-                            for line in walked.splitlines()
-                            if line.startswith(f".1.3.6.1.4.1.55555.4.{suffix}.0 = ")
-                        )
-                        if line.split(": ", 1)[1].strip('"') != expected:
-                            raise RuntimeError(f"unexpected recovery metric: {line}")
-                missing = query("snmpget", "1.3.6.1.4.1.55555.99.0").stdout
-                if "No Such Object" not in missing:
-                    raise RuntimeError(f"unexpected unknown OID response: {missing}")
-                print(f"Net-SNMP {scenario}: GET, WALK and unknown OID passed", flush=True)
+                else:
+                    walked = query("snmpwalk", "1.3.6.1.4.1.55555").stdout
+                    walked_oids = [
+                        line.split(" = ", 1)[0]
+                        for line in walked.splitlines()
+                        if " = INTEGER: " in line or " = STRING: " in line
+                    ]
+                    expected_oids = [f".{metric['oid']}" for metric in device["metrics"]]
+                    if walked_oids != expected_oids:
+                        raise RuntimeError(f"unexpected walk: {walked}")
+                    if scenario == "recovery":
+                        for suffix, expected in (("2", "35"), ("5", "up"), ("6", "120")):
+                            line = next(
+                                line
+                                for line in walked.splitlines()
+                                if line.startswith(f".1.3.6.1.4.1.55555.4.{suffix}.0 = ")
+                            )
+                            if line.split(": ", 1)[1].strip('"') != expected:
+                                raise RuntimeError(f"unexpected recovery metric: {line}")
+                    missing = query("snmpget", "1.3.6.1.4.1.55555.99.0").stdout
+                    if "No Such Object" not in missing:
+                        raise RuntimeError(f"unexpected unknown OID response: {missing}")
+                    print(f"Net-SNMP {scenario}: GET, WALK and unknown OID passed", flush=True)
             finally:
                 process.terminate()
-                process.communicate(timeout=5)
+                _, errors = process.communicate(timeout=5)
+            if process.returncode != 0:
+                raise RuntimeError(f"emulator failed to stop after {scenario}: {errors}")
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            if report["scenario_id"] != scenario or report["outcome"] == "failed":
+                raise RuntimeError(f"unexpected report for {scenario}: {report['outcome']}")
+            if report["requests"]["sent"] == 0:
+                raise RuntimeError(f"report for {scenario} has no SNMP responses")
+            if (
+                scenario == "device-unavailability"
+                and not report["requests"]["intentionally_suppressed"]
+            ):
+                raise RuntimeError("outage report did not record a suppressed request")
+            if scenario == "partial-oid-unavailability":
+                for counter in ("no_such_object", "no_such_instance", "simulated_errors"):
+                    if report["requests"][counter] == 0:
+                        raise RuntimeError(f"partial outage report did not record {counter}")
 
 
 if __name__ == "__main__":

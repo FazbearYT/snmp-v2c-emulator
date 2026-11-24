@@ -128,11 +128,25 @@ jobs:
           "$RUNNER_TEMP/sdist-venv/bin/python" tests/installed_smoke.py
           xvfb-run -a "$RUNNER_TEMP/sdist-venv/bin/python" tests/gui_smoke.py
           "$RUNNER_TEMP/sdist-venv/bin/python" tests/stability_smoke.py
-      - name: Verify examples with Net-SNMP
+      - name: Verify headless Ubuntu 24.04 deployment with Net-SNMP
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y snmp
-          "$RUNNER_TEMP/wheel-venv/bin/python" tests/net_snmp_smoke.py
+          sudo apt-get install -y python3-venv snmp
+          /usr/bin/python3 -m venv "$RUNNER_TEMP/ubuntu-deploy"
+          "$RUNNER_TEMP/ubuntu-deploy/bin/python" -m pip install \
+            --disable-pip-version-check dist/*.whl
+          "$RUNNER_TEMP/ubuntu-deploy/bin/python" -m pip check
+          "$RUNNER_TEMP/ubuntu-deploy/bin/snmp-emulator" --version
+          env -u DISPLAY -u WAYLAND_DISPLAY \
+            "$RUNNER_TEMP/ubuntu-deploy/bin/python" tests/net_snmp_smoke.py
+
+      - name: Upload verified wheel
+        if: ${{ github.event_name != 'pull_request' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: verified-wheel
+          path: dist/*.whl
+          if-no-files-found: error
 
   windows:
     name: Windows smoke (Python 3.13)

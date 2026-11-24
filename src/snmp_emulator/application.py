@@ -41,6 +41,7 @@ class EmulatorApplication:
         self.scenario_id = scenario_id
         self.report_path = report_path
         self.report: dict[str, Any] | None = None
+        self.saved_report_path: Path | None = None
         self.stats = RunStatistics()
         self.scenario_completed = False
         self.started = asyncio.Event()
@@ -97,6 +98,7 @@ class EmulatorApplication:
         self.stats = RunStatistics()
         self.agent.request_counters = self.stats.requests
         self.report = None
+        self.saved_report_path = None
         initial = {metric.name: metric.value for metric in self.store.snapshot()}
         started: datetime = utc_now()
         failed = False
@@ -145,6 +147,7 @@ class EmulatorApplication:
                 if self.report_path is not None:
                     try:
                         save_report(self.report_path, self.report)
+                        self.saved_report_path = self.report_path
                         LOGGER.debug("run report saved: %s", self.report_path)
                     except OSError as exc:
                         LOGGER.error("cannot save run report %s: %s", self.report_path, exc)
