@@ -84,7 +84,11 @@ def test_stop_restart_and_initial_reset(controller, profile):
     controller.stop()
     controller.stop()
     wait_until(lambda: not controller.active)
-    assert controller.snapshot().state == "stopped"
+    snapshot = controller.snapshot()
+    assert snapshot.state == "stopped"
+    assert snapshot.report_outcome == "completed"
+    assert snapshot.report_path is not None
+    assert json.loads(snapshot.report_path.read_text(encoding="utf-8"))["outcome"] == "completed"
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
         probe.bind(("127.0.0.1", port))
     document = json.loads(scenario.read_text())
@@ -116,6 +120,10 @@ def test_busy_port(controller, profile):
     assert controller.snapshot().state == "error"
     assert "cannot bind" in controller.snapshot().error
     assert str(port) in controller.snapshot().error
+    snapshot = controller.snapshot()
+    assert snapshot.report_outcome == "failed"
+    assert snapshot.report_path is not None
+    assert snapshot.report_path.is_file()
 
 
 def test_stop_during_loading_prevents_start(controller, profile, monkeypatch):

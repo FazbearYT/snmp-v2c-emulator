@@ -64,6 +64,8 @@ class PanelSnapshot:
     error: str = ""
     session: int = 0
     profile: str = ""
+    report_path: Path | None = None
+    report_outcome: str = ""
 
 
 class PanelController:
@@ -107,15 +109,19 @@ class PanelController:
         try:
             config = load_json_config(device, scenario)
             if not self._stop.is_set():
-                asyncio.run(
-                    self._observe(
-                        EmulatorApplication(
-                            config,
-                            scenario_id=scenario.stem,
-                            report_path=default_report_path(scenario),
-                        )
-                    )
+                application = EmulatorApplication(
+                    config,
+                    scenario_id=scenario.stem,
+                    report_path=default_report_path(scenario),
                 )
+                try:
+                    asyncio.run(self._observe(application))
+                finally:
+                    if application.saved_report_path is not None and application.report is not None:
+                        self._publish(
+                            report_path=application.saved_report_path,
+                            report_outcome=application.report["outcome"],
+                        )
         except ConfigurationError as exc:
             LOGGER.error("configuration error: %s", exc)
             self._publish(state="error", error=str(exc))
@@ -146,7 +152,7 @@ class PanelController:
                     await task
                     raise RuntimeError("Эмулятор неожиданно завершился")
                 elapsed = time.monotonic() - started_at
-                completed = config.duration is not None and elapsed >= config.duration
+                completed = application.scenario_completed
                 self._publish(
                     state=(
                         "unavailable"

@@ -6,6 +6,7 @@ import socket
 import tempfile
 import time
 import tkinter as tk
+from contextlib import chdir
 from pathlib import Path
 
 from installed_smoke import reserve_udp_port
@@ -71,7 +72,7 @@ def main():
     root.bind("<Destroy>", on_destroy, add=True)
     panel = EmulatorPanel(root)
     try:
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory() as directory, chdir(directory):
             examples = examples_directory()
             device = json.loads((examples / "device.json").read_text())
             port = reserve_udp_port()
@@ -108,7 +109,14 @@ def main():
             if output.count("Завершено за") != 4 or "Ошибка" in output:
                 raise RuntimeError(f"Console smoke failed: {output}")
             panel.stop()
-            pump(root, lambda: not panel.controller.active)
+            pump(root, lambda: not panel.controller.active and bool(panel.report_path.get()))
+            report_path = Path(panel.report_path.get())
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            if (
+                report["outcome"] != "completed"
+                or "Сценарий завершён" not in panel.report_status.get()
+            ):
+                raise RuntimeError("GUI did not display the completed run report")
             panel.start()
             pump(root, lambda: panel.controller.snapshot().state == "running")
             panel.close()

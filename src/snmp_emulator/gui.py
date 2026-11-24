@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import logging
+import os
+import subprocess
+import sys
 import tkinter as tk
 from collections import deque
 from pathlib import Path
-from tkinter import filedialog, ttk
+from tkinter import filedialog, messagebox, ttk
 
 from .gui_console import SnmpConsoleWindow
 from .gui_controller import PROFILES, PanelController, PanelSnapshot, examples_directory
@@ -38,6 +41,13 @@ STATES = {
 }
 
 
+REPORT_OUTCOMES = {
+    "completed": "Сценарий завершён",
+    "stopped_early": "Сценарий остановлен досрочно",
+    "failed": "Прогон завершился ошибкой",
+}
+
+
 class EmulatorPanel:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
@@ -55,6 +65,8 @@ class EmulatorPanel:
         self.status = tk.StringVar(value=STATES["idle"])
         self.details = tk.StringVar(value="Адрес и порт будут прочитаны из устройства")
         self.error = tk.StringVar()
+        self.report_status = tk.StringVar()
+        self.report_path = tk.StringVar()
         self.selected_metric = tk.StringVar()
         self._build()
         root.protocol("WM_DELETE_WINDOW", self.close)
@@ -125,6 +137,7 @@ class EmulatorPanel:
         self._change_mode()
         actions = ttk.Frame(frame)
         actions.grid(row=5, column=0, columnspan=3, sticky="ew", pady=16)
+        actions.columnconfigure(3, weight=1)
         self.start_button = ttk.Button(actions, text="Запустить", command=self.start)
         self.start_button.grid(row=0, column=0)
         self.stop_button = ttk.Button(
@@ -135,6 +148,17 @@ class EmulatorPanel:
         ttk.Label(actions, textvariable=self.status, style="Status.TLabel", wraplength=740).grid(
             row=1, column=0, columnspan=3, sticky="w", pady=(8, 0)
         )
+        self.report_frame = ttk.Frame(actions)
+        self.report_frame.grid(row=2, column=0, columnspan=4, sticky="ew", pady=(8, 0))
+        self.report_frame.columnconfigure(0, weight=1)
+        ttk.Label(self.report_frame, textvariable=self.report_status).grid(row=0, sticky="w")
+        ttk.Entry(self.report_frame, textvariable=self.report_path, state="readonly").grid(
+            row=1, column=0, sticky="ew"
+        )
+        ttk.Button(self.report_frame, text="Открыть папку", command=self.open_report_folder).grid(
+            row=1, column=1, padx=(8, 0)
+        )
+        self.report_frame.grid_remove()
         ttk.Label(frame, textvariable=self.details).grid(row=6, column=0, columnspan=3, sticky="w")
         ttk.Label(frame, textvariable=self.error, style="Error.TLabel", wraplength=940).grid(
             row=7, column=0, columnspan=3, sticky="w", pady=(4, 8)
@@ -261,10 +285,33 @@ class EmulatorPanel:
                 else STATES[snapshot.state]
             )
             self.error.set(snapshot.error)
+            self._show_report(snapshot)
             self._set_active(self.controller.active)
             if snapshot.metrics:
                 self._show_metrics(snapshot)
         self.root.after(100, self._refresh)
+
+    def _show_report(self, snapshot: PanelSnapshot) -> None:
+        if snapshot.report_path is None:
+            self.report_frame.grid_remove()
+            return
+        self.report_status.set(f"Отчёт сохранён · {REPORT_OUTCOMES[snapshot.report_outcome]}")
+        self.report_path.set(str(snapshot.report_path))
+        self.report_frame.grid()
+
+    def open_report_folder(self) -> None:
+        path = self.controller.snapshot().report_path
+        if path is None:
+            return
+        folder = path.parent
+        try:
+            if sys.platform == "win32":
+                os.startfile(folder)
+            else:
+                command = "open" if sys.platform == "darwin" else "xdg-open"
+                subprocess.Popen([command, str(folder)])
+        except OSError as exc:
+            messagebox.showerror("Не удалось открыть папку", str(exc), parent=self.root)
 
     def open_console(self) -> None:
         if self.console is None:

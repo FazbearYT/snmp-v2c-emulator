@@ -1,5 +1,6 @@
 import asyncio
 from dataclasses import dataclass
+from pathlib import Path
 
 import pytest
 
@@ -10,6 +11,8 @@ from snmp_emulator.domain.store import MetricStore
 from snmp_emulator.domain.types import SnmpDataType
 from snmp_emulator.scenarios.actions import RampAction, SequenceAction, SetAction, StepAction
 from snmp_emulator.scenarios.engine import Scenario, ScenarioEngine, build_scenarios
+
+EXAMPLES = Path(__file__).parents[1] / "examples"
 
 
 @dataclass
@@ -148,7 +151,7 @@ def test_step_respects_maximum() -> None:
 
 
 def test_builds_every_action_type_from_configuration() -> None:
-    config = load_config("examples/overload.yaml")
+    config = load_config(EXAMPLES / "overload.yaml")
 
     scenarios = build_scenarios(config.scenarios)
 
@@ -164,7 +167,7 @@ def test_builds_every_action_type_from_configuration() -> None:
 
 
 def test_build_orders_actions_by_start_time() -> None:
-    config = load_config("examples/device.yaml")
+    config = load_config(EXAMPLES / "device.yaml")
     scenario_config = config.scenarios[0]
     scenario_config.actions.reverse()
 

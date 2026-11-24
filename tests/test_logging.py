@@ -21,7 +21,6 @@ TIMESTAMP = r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3}"
 def run_python(*arguments):
     return subprocess.run(
         [sys.executable, *arguments],
-        cwd=PROJECT,
         env={**os.environ, "PYTHONPATH": str(PROJECT / "src"), "PYTHONIOENCODING": "utf-8"},
         capture_output=True,
         text=True,
@@ -201,10 +200,11 @@ def load(path):
 
 cli.load_config = load
 raise SystemExit(cli.main([
-    '--config', 'examples/device.yaml', '--check-config', '--log-level', sys.argv[1],
+    '--config', sys.argv[2], '--check-config', '--log-level', sys.argv[1],
 ]))
 """,
         level,
+        str(EXAMPLES / "device.yaml"),
     )
 
     assert result.returncode == 0, result.stderr
