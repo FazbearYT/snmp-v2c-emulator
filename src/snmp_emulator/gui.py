@@ -11,6 +11,7 @@ from tkinter import filedialog, messagebox, ttk
 
 from .gui_console import SnmpConsoleWindow
 from .gui_controller import PROFILES, PanelController, PanelSnapshot, examples_directory
+from .gui_editor import ConfigEditor
 from .logging_config import configure_logging
 
 LOGGER = logging.getLogger(__name__)
@@ -53,6 +54,7 @@ class EmulatorPanel:
         self.root = root
         self.controller = PanelController()
         self.console: SnmpConsoleWindow | None = None
+        self.editor: ConfigEditor | None = None
         self._closing = False
         self._stopping = False
         self._history: deque[tuple[float, dict[str, int]]] = deque(maxlen=600)
@@ -137,7 +139,7 @@ class EmulatorPanel:
         self._change_mode()
         actions = ttk.Frame(frame)
         actions.grid(row=5, column=0, columnspan=3, sticky="ew", pady=16)
-        actions.columnconfigure(3, weight=1)
+        actions.columnconfigure(4, weight=1)
         self.start_button = ttk.Button(actions, text="Запустить", command=self.start)
         self.start_button.grid(row=0, column=0)
         self.stop_button = ttk.Button(
@@ -145,11 +147,16 @@ class EmulatorPanel:
         )
         self.stop_button.grid(row=0, column=1, padx=8)
         ttk.Button(actions, text="SNMP-запросы…", command=self.open_console).grid(row=0, column=2)
+        self.editor_button = ttk.Button(
+            actions, text="Редактор конфигураций…", command=self.open_editor
+        )
+        self.editor_button.grid(row=0, column=3, padx=(8, 0))
+        self._inputs.append(self.editor_button)
         ttk.Label(actions, textvariable=self.status, style="Status.TLabel", wraplength=740).grid(
-            row=1, column=0, columnspan=3, sticky="w", pady=(8, 0)
+            row=1, column=0, columnspan=5, sticky="w", pady=(8, 0)
         )
         self.report_frame = ttk.Frame(actions)
-        self.report_frame.grid(row=2, column=0, columnspan=4, sticky="ew", pady=(8, 0))
+        self.report_frame.grid(row=2, column=0, columnspan=5, sticky="ew", pady=(8, 0))
         self.report_frame.columnconfigure(0, weight=1)
         ttk.Label(self.report_frame, textvariable=self.report_status).grid(row=0, sticky="w")
         ttk.Entry(self.report_frame, textvariable=self.report_path, state="readonly").grid(
@@ -324,6 +331,20 @@ class EmulatorPanel:
             and snapshot.state in ("running", "completed"),
         )
         self.console.show()
+
+    def open_editor(self) -> None:
+        if self._closing or self.controller.active:
+            return
+        if self.editor is not None and self.editor.window.winfo_exists():
+            self.editor.window.lift()
+            return
+        self.editor = ConfigEditor(self.root, self.selected_paths(), self._select_saved_pair)
+
+    def _select_saved_pair(self, device: Path, scenario: Path) -> None:
+        self.device.set(str(device))
+        self.scenario.set(str(scenario))
+        self.mode.set("custom")
+        self._change_mode()
 
     def _show_metrics(self, snapshot: PanelSnapshot) -> None:
         scenario_time = (
